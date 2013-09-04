@@ -12,7 +12,10 @@ import com.continuuity.metrics.transport.TagMetric;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import org.apache.hadoop.hbase.filter.Filter;
+import org.apache.hadoop.hbase.filter.FilterList;
+import org.apache.hadoop.hbase.filter.FirstKeyOnlyFilter;
 import org.apache.hadoop.hbase.filter.FuzzyRowFilter;
+import org.apache.hadoop.hbase.filter.KeyOnlyFilter;
 import org.apache.hadoop.hbase.util.Pair;
 
 import java.util.Iterator;
@@ -111,11 +114,63 @@ public final class AggregatesTable {
     byte[] endRow = getPaddedKey(contextPrefix, metricPrefix, runId, 0xff);
 
     Scanner scanner;
-    if (isFilterable && ((FilterableOVCTable) aggregatesTable).isFilterSupported(FuzzyRowFilter.class)) {
+    if (isFilterable && (aggregatesTable instanceof HBaseFilterableOVCTable) &&
+      ((FilterableOVCTable) aggregatesTable).isFilterSupported(FuzzyRowFilter.class)) {
       scanner = ((FilterableOVCTable) aggregatesTable).scan(startRow, endRow,
                                                             MemoryReadPointer.DIRTY_READ,
                                                             getFilter(contextPrefix, metricPrefix, runId));
+    } else if (isFilterable && (aggregatesTable instanceof LevelDBFilterableOVCTable)) {
+      scanner = ((FilterableOVCTable) aggregatesTable).scan(
+        startRow, endRow, MemoryReadPointer.DIRTY_READ,
+        new LevelDBFuzzyRowFilter(getFilter(contextPrefix, metricPrefix, runId)));
     } else {
+      scanner = aggregatesTable.scan(startRow, endRow, MemoryReadPointer.DIRTY_READ);
+    }
+
+    return new AggregatesScanner(contextPrefix, metricPrefix, runId,
+                                 tagPrefix == null ? MetricsConstants.EMPTY_TAG : tagPrefix, scanner, entityCodec);
+  }
+
+  /**
+   * Scans the aggregate table for its rows only.
+   *
+   * @param contextPrefix Prefix of context to match
+   * @param metricPrefix Prefix of metric to match
+   * @return A {@link AggregatesScanner} for iterating scan over matching rows
+   */
+  public AggregatesScanner scanRowsOnly(String contextPrefix, String metricPrefix) {
+    return scanRowsOnly(contextPrefix, metricPrefix, null, MetricsConstants.EMPTY_TAG);
+  }
+
+  /**
+   * Scans the aggregate table for its rows only.
+   *
+   * @param contextPrefix Prefix of context to match
+   * @param metricPrefix Prefix of metric to match
+   * @param tagPrefix Prefix of tag to match
+   * @return A {@link AggregatesScanner} for iterating scan over matching rows
+   */
+  public AggregatesScanner scanRowsOnly(String contextPrefix, String metricPrefix, String runId, String tagPrefix) {
+    byte[] startRow = getRawPaddedKey(contextPrefix, metricPrefix, runId, 0);
+    byte[] endRow = getRawPaddedKey(contextPrefix, metricPrefix, runId, 0xff);
+
+    Scanner scanner;
+    if (isFilterable && (aggregatesTable instanceof HBaseFilterableOVCTable) &&
+      ((FilterableOVCTable) aggregatesTable).isFilterSupported(FuzzyRowFilter.class)) {
+      Filter rowFilter = getFilter(contextPrefix, metricPrefix, runId);
+      // Putting the FuzzyRowFilter into the filter list results in hbase throwing a RetriesExhaustedException
+      // when we try and get the scanner... so just using the filter by itself until we figure out how to fix it
+      //FilterList filters = new FilterList(FilterList.Operator.MUST_PASS_ALL,
+      //                                    rowFilter, new KeyOnlyFilter(), new FirstKeyOnlyFilter());
+      scanner = ((FilterableOVCTable) aggregatesTable).scan(startRow, endRow,
+                                                            MemoryReadPointer.DIRTY_READ,
+                                                            rowFilter);
+    } else if (isFilterable && (aggregatesTable instanceof LevelDBFilterableOVCTable)) {
+      scanner = ((FilterableOVCTable) aggregatesTable).scan(
+        startRow, endRow, MemoryReadPointer.DIRTY_READ,
+        new LevelDBFuzzyRowFilter(getFilter(contextPrefix, metricPrefix, runId)));
+    } else {
+      // TODO(albert) add a way to get a scanner for rows only for OVCTables
       scanner = aggregatesTable.scan(startRow, endRow, MemoryReadPointer.DIRTY_READ);
     }
 
@@ -136,16 +191,21 @@ public final class AggregatesTable {
     Preconditions.checkArgument(runId != null, "RunId cannot be null.");
     Preconditions.checkArgument(metric != null, "Metric cannot be null.");
 
-    return Bytes.add(entityCodec.encode(MetricsEntityType.CONTEXT, context),
-                     entityCodec.encode(MetricsEntityType.METRIC, metric),
-                     entityCodec.encode(MetricsEntityType.RUN, runId));
-
+    return Bytes.add(
+      entityCodec.encode(MetricsEntityType.CONTEXT, context),
+      entityCodec.encode(MetricsEntityType.METRIC, metric),
+      entityCodec.encode(MetricsEntityType.RUN, runId)
+    );
   }
 
   private byte[] getPaddedKey(String contextPrefix, String metricPrefix, String runId, int padding) {
 
     Preconditions.checkArgument(metricPrefix != null, "Metric cannot be null.");
 
+    return getRawPaddedKey(contextPrefix, metricPrefix, runId, padding);
+  }
+
+  private byte[] getRawPaddedKey(String contextPrefix, String metricPrefix, String runId, int padding) {
     return Bytes.concat(
       entityCodec.paddedEncode(MetricsEntityType.CONTEXT, contextPrefix, padding),
       entityCodec.paddedEncode(MetricsEntityType.METRIC, metricPrefix, padding),
@@ -153,7 +213,7 @@ public final class AggregatesTable {
     );
   }
 
-  private Filter getFilter(String contextPrefix, String metricPrefix, String runId) {
+  private FuzzyRowFilter getFilter(String contextPrefix, String metricPrefix, String runId) {
     // Create fuzzy row filter
     ImmutablePair<byte[], byte[]> contextPair = entityCodec.paddedFuzzyEncode(MetricsEntityType.CONTEXT,
                                                                               contextPrefix, 0);

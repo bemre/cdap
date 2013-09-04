@@ -14,11 +14,18 @@ import com.continuuity.common.conf.Constants;
 import com.continuuity.common.conf.KafkaConstants;
 import com.continuuity.common.guice.ConfigModule;
 import com.continuuity.common.guice.IOModule;
+import com.continuuity.common.guice.LocationRuntimeModule;
 import com.continuuity.common.metrics.MetricsCollectionService;
+import com.continuuity.data.DataSetAccessor;
+import com.continuuity.data.DistributedDataSetAccessor;
+import com.continuuity.data.operation.executor.NoOperationExecutor;
 import com.continuuity.data.operation.executor.OperationExecutor;
-import com.continuuity.data.operation.executor.remote.RemoteOperationExecutor;
+import com.continuuity.data2.queue.QueueClientFactory;
+import com.continuuity.data2.transaction.TransactionSystemClient;
+import com.continuuity.data2.transaction.queue.hbase.HBaseQueueClientFactory;
+import com.continuuity.data2.transaction.server.TalkingToOpexTxSystemClient;
 import com.continuuity.internal.app.queue.QueueReaderFactory;
-import com.continuuity.internal.app.queue.SingleQueueReader;
+import com.continuuity.internal.app.queue.SingleQueue2Reader;
 import com.continuuity.internal.app.runtime.AbstractListener;
 import com.continuuity.internal.app.runtime.BasicArguments;
 import com.continuuity.internal.app.runtime.DataFabricFacade;
@@ -28,7 +35,7 @@ import com.continuuity.internal.app.runtime.SmartDataFabricFacade;
 import com.continuuity.internal.kafka.client.ZKKafkaClientService;
 import com.continuuity.kafka.client.KafkaClientService;
 import com.continuuity.logging.appender.LogAppenderInitializer;
-import com.continuuity.logging.runtime.LoggingModules;
+import com.continuuity.logging.guice.LoggingModules;
 import com.continuuity.metrics.guice.MetricsClientRuntimeModule;
 import com.continuuity.weave.api.Command;
 import com.continuuity.weave.api.ServiceAnnouncer;
@@ -37,7 +44,6 @@ import com.continuuity.weave.api.WeaveRunnable;
 import com.continuuity.weave.api.WeaveRunnableSpecification;
 import com.continuuity.weave.common.Cancellable;
 import com.continuuity.weave.common.Services;
-import com.continuuity.weave.filesystem.HDFSLocationFactory;
 import com.continuuity.weave.filesystem.LocalLocationFactory;
 import com.continuuity.weave.filesystem.LocationFactory;
 import com.continuuity.weave.zookeeper.RetryStrategies;
@@ -266,14 +272,13 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
     return Modules.combine(new ConfigModule(cConf, hConf),
                            new IOModule(),
                            new MetricsClientRuntimeModule(kafkaClientService).getDistributedModules(),
+                           new LocationRuntimeModule().getDistributedModules(),
                            new LoggingModules().getDistributedModules(),
                            new AbstractModule() {
       @Override
       protected void configure() {
         bind(InetAddress.class).annotatedWith(Names.named(Constants.CFG_APP_FABRIC_SERVER_ADDRESS))
                                .toInstance(context.getHost());
-
-        bind(LocationFactory.class).toInstance(new HDFSLocationFactory(hConf));
 
         // For program loading
         install(createProgramFactoryModule());
@@ -284,11 +289,20 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
                                     SmartDataFabricFacade.class));
 
         // For Binding queue stuff
-        install(createFactoryModule(QueueReaderFactory.class, QueueReader.class, SingleQueueReader.class));
+        install(createQueueFactoryModule());
 
         // Bind remote operation executor
-        bind(OperationExecutor.class).to(RemoteOperationExecutor.class).in(Singleton.class);
+        // NOTE: for demo purposes in 1.7 we do not contact Tx Manager remotly. TODO: this should not go into production
+//        bind(OperationExecutor.class).to(RemoteOperationExecutor.class).in(Singleton.class);
+        bind(OperationExecutor.class).to(NoOperationExecutor.class).in(Singleton.class);
         bind(CConfiguration.class).annotatedWith(Names.named("RemoteOperationExecutorConfig")).toInstance(cConf);
+
+        // Bind TxDs2 stuff
+        bind(DataSetAccessor.class).to(DistributedDataSetAccessor.class).in(Singleton.class);
+        bind(TransactionSystemClient.class).to(TalkingToOpexTxSystemClient.class).in(Singleton.class);
+        bind(CConfiguration.class).annotatedWith(Names.named("HBaseOVCTableHandleCConfig")).toInstance(cConf);
+        bind(Configuration.class).annotatedWith(Names.named("HBaseOVCTableHandleHConfig")).toInstance(hConf);
+        bind(QueueClientFactory.class).to(HBaseQueueClientFactory.class).in(Singleton.class);
 
         bind(ServiceAnnouncer.class).toInstance(new ServiceAnnouncer() {
           @Override
@@ -303,14 +317,15 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
   private <T> Module createFactoryModule(final Class<?> factoryClass,
                                          final Class<T> sourceClass,
                                          final Class<? extends T> targetClass) {
-    return new AbstractModule() {
-      @Override
-      protected void configure() {
-        install(new FactoryModuleBuilder()
-                  .implement(sourceClass, targetClass)
-                  .build(factoryClass));
-      }
-    };
+    return new FactoryModuleBuilder()
+      .implement(sourceClass, targetClass)
+      .build(factoryClass);
+  }
+
+  private Module createQueueFactoryModule() {
+    return new FactoryModuleBuilder()
+      .implement(QueueReader.class, SingleQueue2Reader.class)
+      .build(QueueReaderFactory.class);
   }
 
   private Module createProgramFactoryModule() {

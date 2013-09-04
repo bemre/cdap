@@ -8,12 +8,12 @@ public class Constants {
   /**
    * The prefix for all continuity classes.
    */
-  static final String CONTINUUITY_PREFIX = "X-Continuuity-";
+  public static final String CONTINUUITY_PREFIX = "X-Continuuity-";
 
   /**
    * The prefix for all gateway properties.
    */
-  static final String GATEWAY_PREFIX = "gateway.";
+  public static final String GATEWAY_PREFIX = "gateway.";
 
   /**
    * Used by the external client to identify and authenticate the client.
@@ -44,7 +44,7 @@ public class Constants {
    * Hostname of the gateway service.
    */
   public static final String CONFIG_HOSTNAME
-    = GATEWAY_PREFIX + "hostname";
+    = GATEWAY_PREFIX + "server.address";
 
   /**
    * Whether gateway should provide ZK service discovery to the connectors.

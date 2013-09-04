@@ -27,9 +27,11 @@ import com.continuuity.data.operation.ttqueue.admin.QueueInfo;
 import com.continuuity.data.table.Scanner;
 
 import javax.annotation.Nullable;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * This is an implementation of OperationExecutor that does nothing but
@@ -228,6 +230,40 @@ public class NoOperationExecutor implements OperationExecutor {
         // nothing to do
       }
     };
+  }
+
+  // Dataset and queue logic relies on tx id to grow monotonically even after restart. Hence we need to start with
+  // value that is for sure bigger than the last one used before restart.
+  // NOTE: with code below we assume we don't do more than 100K tx/sec
+  private AtomicLong tx = new AtomicLong(System.currentTimeMillis() * 100);
+
+  @Override
+  public com.continuuity.data2.transaction.Transaction start() throws OperationException {
+    long wp = tx.incrementAndGet();
+    // NOTE: -1 here is because we have logic that uses (readpointer + 1) as a "exclusive stop key" in some datasets
+    return new com.continuuity.data2.transaction.Transaction(Long.MAX_VALUE - 1, wp, new long[]{});
+  }
+
+  @Override
+  public com.continuuity.data2.transaction.Transaction start(Integer timeout) throws OperationException {
+    long wp = tx.incrementAndGet();
+    return new com.continuuity.data2.transaction.Transaction(Long.MAX_VALUE - 1, wp, new long[]{});
+  }
+
+  @Override
+  public boolean canCommit(com.continuuity.data2.transaction.Transaction tx, Collection<byte[]> changeIds)
+    throws OperationException {
+    return true;
+  }
+
+  @Override
+  public boolean commit(com.continuuity.data2.transaction.Transaction tx) throws OperationException {
+    return true;
+  }
+
+  @Override
+  public boolean abort(com.continuuity.data2.transaction.Transaction tx) throws OperationException {
+    return true;
   }
 
   @Override

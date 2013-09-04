@@ -58,6 +58,48 @@ define([], function () {
 			fileQueue: [],
 			entityType: null,
 
+			configure: function () {
+
+				function ignoreDrag(e) {
+					e.originalEvent.stopPropagation();
+					e.originalEvent.preventDefault();
+				}
+
+				var self = this;
+				var element = $('body');
+
+				function drop (e) {
+					ignoreDrag(e);
+
+					C.Util.interrupt();
+
+					if (!C.Util.Upload.processing) {
+						var dt = e.originalEvent.dataTransfer;
+						C.Util.Upload.sendFiles(dt.files, self.get('entityType'));
+						$('#far-upload-alert').hide();
+					}
+				}
+
+				var entered = 0;
+
+				element.bind('dragenter', function (e) {
+
+					ignoreDrag(e);
+					entered = new Date().getTime();
+					$('#drop-hover').fadeIn();
+
+				}).bind('dragleave', function (e) {
+
+					var now = new Date().getTime();
+					if (now - entered > 5) {
+						$('#drop-hover').fadeOut();
+					}
+
+				}).bind('dragover', ignoreDrag)
+					.bind('drop', drop);
+
+			},
+
 			__sendFile: function () {
 
 				var file = this.fileQueue.shift();
@@ -102,6 +144,10 @@ define([], function () {
 
 				if (response.error) {
 					C.Modal.show("Deployment Error", response.error);
+					$('#drop-hover').fadeOut(function () {
+						$('#drop-label').show();
+						$('#drop-loading').hide();
+					});
 					this.processing = false;
 
 				} else {
@@ -133,13 +179,16 @@ define([], function () {
 							$('.modal').modal('hide');
 
 							C.Modal.show("Deployment Error", response.message);
-
+							$('#drop-hover').fadeOut(function () {
+								$('#drop-label').show();
+								$('#drop-loading').hide();
+							});
 					}
 				}
 			}
 		}),
 
-		updateAggregates: function (models, http) {
+		updateAggregates: function (models, http, controller) {
 
 			var j, k, metrics, map = {};
 			var queries = [];
@@ -160,7 +209,7 @@ define([], function () {
 			}
 			if (queries.length) {
 				http.post('metrics', queries, function (response) {
-
+					controller.set('aggregatesCompleted', true);
 					if (response.result) {
 
 						var result = response.result;
@@ -175,11 +224,13 @@ define([], function () {
 						}
 					}
 				});
+			} else {
+				controller.set('aggregatesCompleted', true);
 			}
 
 		},
 
-		updateTimeSeries: function (models, http) {
+		updateTimeSeries: function (models, http, controller) {
 
 			var j, k, metrics, count, map = {};
 			var queries = [];
@@ -222,7 +273,7 @@ define([], function () {
 			if (queries.length) {
 
 				http.post('metrics', queries, function (response) {
-
+					controller.set('timeseriesCompleted', true);
 					if (response.result) {
 
 						var result = response.result;
@@ -234,7 +285,7 @@ define([], function () {
 
 							if (result[i].error) {
 
-								console.error('TimeSeries', result[i].error);
+								//pass
 
 							} else {
 
@@ -264,11 +315,13 @@ define([], function () {
 					}
 
 				});
+			} else {
+				controller.set('timeseriesCompleted', true);
 			}
 
 		},
 
-		updateRates: function (models, http) {
+		updateRates: function (models, http, controller) {
 
 			var j, k, metrics, count, map = {};
 			var queries = [];
@@ -296,7 +349,7 @@ define([], function () {
 			if (queries.length) {
 
 				http.post('metrics', queries, function (response) {
-
+					controller.set('ratesCompleted', true);
 					if (response.result) {
 
 						var result = response.result;
@@ -307,7 +360,7 @@ define([], function () {
 							path = result[i].path.split('?')[0];
 
 							if (result[i].error) {
-								console.error('Rates', result[i].error);
+								// pass
 							} else {
 								data = result[i].result.data, k = data.length;
 
@@ -326,6 +379,8 @@ define([], function () {
 					}
 
 				});
+			} else {
+				controller.set('ratesCompleted', true);
 			}
 
 		},
@@ -357,7 +412,7 @@ define([], function () {
 				.attr('preserveAspectRatio', 'none');
 
 			var g = vis.append("svg:g");
-			var line = d3.svg.line().interpolate("basis")
+			var line = d3.svg.line().interpolate("monotone")
 				.x(function(d,i) { return x(i); })
 				.y(function(d) { return y(d); });
 
@@ -415,12 +470,12 @@ define([], function () {
 							.range([margin, h - margin]);
 					}
 
-					var line = d3.svg.line().interpolate("basis")
+					var line = d3.svg.line().interpolate("monotone")
 						.x(function(d,i) { return x(i); })
 						.y(function(d) { return y(d); });
 
 					if (this.percent || this.shade) {
-						var area = d3.svg.area().interpolate("basis")
+						var area = d3.svg.area().interpolate("monotone")
 							.x(line.x())
 							.y1(line.y())
 							.y0(y(-100));
@@ -501,11 +556,40 @@ define([], function () {
 
 			return [value, 'B'];
 		},
+
+		interrupt: function () {
+
+			$('#drop-border').addClass('hidden');
+
+			$('#drop-label').hide();
+			$('#drop-loading').show();
+			$('#drop-hover').show();
+
+		},
+
+		proceed: function (done) {
+
+			$('#drop-hover').fadeOut(function () {
+
+				$('#drop-border').removeClass('hidden');
+
+				$('#drop-label').show();
+				$('#drop-loading').hide();
+				if (typeof done === 'function') {
+					done();
+				}
+			});
+
+		},
+
 		reset: function () {
+
 			C.Modal.show(
 				"Reset Reactor",
 				"You are about to DELETE ALL CONTINUUITY DATA on your Reactor. Are you sure you would like to do this?",
 				function () {
+
+					C.Util.interrupt();
 
 					C.get('far', {
 						method: 'reset',
@@ -514,16 +598,14 @@ define([], function () {
 
 						if (error) {
 
-							setTimeout(function () {
-								C.Modal.show(
-									"Reset Error",
-									error.message
-									);
-							}, 1000);
+							C.Util.proceed(function () {
+								C.Modal.show("Reset Error", error.message);
+							});
 
 						} else {
-							window.location.href = '/';
-							window.location.reload();
+
+							window.location = '/';
+
 						}
 
 					});

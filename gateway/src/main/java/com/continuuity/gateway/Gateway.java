@@ -5,8 +5,10 @@ import com.continuuity.app.store.StoreFactory;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.service.Server;
 import com.continuuity.common.service.ServerException;
+import com.continuuity.data.DataSetAccessor;
 import com.continuuity.data.metadata.MetaDataStore;
 import com.continuuity.data.operation.executor.OperationExecutor;
+import com.continuuity.data2.transaction.TransactionSystemClient;
 import com.continuuity.gateway.auth.GatewayAuthenticator;
 import com.continuuity.gateway.auth.NoAuthenticator;
 import com.continuuity.gateway.auth.PassportVPCAuthenticator;
@@ -49,6 +51,12 @@ public class Gateway implements Server {
   private static final Logger LOG = LoggerFactory.getLogger(Gateway.class);
 
   /**
+   * New Gateway.
+   */
+  @Inject
+  com.continuuity.gateway.v2.Gateway gatewayV2;
+
+  /**
    * This is the consumer that all collectors will use.
    * Gateway can not function without a valid Consumer.
    */
@@ -68,6 +76,14 @@ public class Gateway implements Server {
    */
   @Inject
   private LocationFactory locationFactory;
+
+  // to support early integration with TxDs2
+  @Inject
+  private DataSetAccessor dataSetAccessor;
+
+  // to support early integration with TxDs2
+  @Inject
+  private TransactionSystemClient txSystemClient;
 
   /**
    * This is the executor that all accessors will use for the data fabric.
@@ -167,6 +183,13 @@ public class Gateway implements Server {
   public void start(String[] args, CConfiguration conf) throws
     ServerException {
 
+    // Start gateway v2
+    if (gatewayV2 != null) {
+      gatewayV2.startAndWait();
+    } else {
+      LOG.warn("Gateway v2 is null, not starting it.");
+    }
+
     // Configure ourselves first
     configure(conf);
 
@@ -212,8 +235,11 @@ public class Gateway implements Server {
         ((StoreAware) connector).setStore(this.store);
       }
       if (connector instanceof DataAccessor) {
-        ((DataAccessor) connector).setExecutor(this.executor);
-        ((DataAccessor) connector).setLocationFactory(this.locationFactory);
+        DataAccessor dataAccessor = (DataAccessor) connector;
+        dataAccessor.setExecutor(this.executor);
+        dataAccessor.setLocationFactory(this.locationFactory);
+        dataAccessor.setDataSetAccessor(this.dataSetAccessor);
+        dataAccessor.setTxSystemClient(this.txSystemClient);
       }
       if (connector instanceof LogReaderAware) {
         ((LogReaderAware) connector).setLogReader(logReader);
@@ -240,6 +266,10 @@ public class Gateway implements Server {
   public void stop(boolean now) throws ServerException {
 
     LOG.info("Gateway Shutting down");
+
+    if (gatewayV2 != null) {
+      gatewayV2.stopAndWait();
+    }
 
     // Stop all our connectors
     for (Connector connector : this.connectorList) {
@@ -303,6 +333,16 @@ public class Gateway implements Server {
   public void setDiscoveryServiceClient(
     DiscoveryServiceClient discoveryServiceClient) {
     this.discoveryServiceClient = discoveryServiceClient;
+  }
+
+  // to be used by unit-tests only
+  void setDataSetAccessor(DataSetAccessor dataSetAccessor) {
+    this.dataSetAccessor = dataSetAccessor;
+  }
+
+  // to be used by unit-tests only
+  void setTxSystemClient(TransactionSystemClient txSystemClient) {
+    this.txSystemClient = txSystemClient;
   }
 
   /**

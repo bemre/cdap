@@ -1,7 +1,6 @@
 package com.continuuity.internal.app.runtime.batch.hadoop;
 
 import com.continuuity.api.common.Bytes;
-import com.continuuity.api.data.DataSet;
 import com.continuuity.api.data.OperationException;
 import com.continuuity.api.data.dataset.KeyValueTable;
 import com.continuuity.api.data.dataset.SimpleTimeseriesTable;
@@ -9,12 +8,17 @@ import com.continuuity.api.data.dataset.TimeseriesTable;
 import com.continuuity.app.program.Program;
 import com.continuuity.app.runtime.ProgramController;
 import com.continuuity.app.runtime.ProgramRunner;
+import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.data.DataFabricImpl;
+import com.continuuity.data.DataSetAccessor;
 import com.continuuity.data.dataset.DataSetInstantiator;
 import com.continuuity.data.operation.OperationContext;
 import com.continuuity.data.operation.executor.OperationExecutor;
 import com.continuuity.data.operation.executor.SynchronousTransactionAgent;
+import com.continuuity.data.operation.executor.TransactionAgent;
 import com.continuuity.data.operation.executor.TransactionProxy;
+import com.continuuity.data2.transaction.TransactionSystemClient;
+import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
 import com.continuuity.internal.app.deploy.pipeline.ApplicationWithPrograms;
 import com.continuuity.internal.app.runtime.BasicArguments;
 import com.continuuity.internal.app.runtime.ProgramRunnerFactory;
@@ -25,9 +29,10 @@ import com.continuuity.weave.filesystem.LocationFactory;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
 import com.google.inject.Injector;
-import org.apache.commons.io.FileUtils;
 import org.junit.Assert;
+import org.junit.ClassRule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -44,24 +49,54 @@ import java.util.concurrent.TimeUnit;
  *
  */
 public class MapReduceProgramRunnerTest {
-  private static Injector injector = TestHelper.getInjector();
+  private static Injector injector;
+  static {
+    // we are only gonna do long-running transactions here. Set the tx timeout to a ridiculously low value.
+    // that will test that the long-running transactions actually bypass that timeout.
+    CConfiguration conf = CConfiguration.create();
+    conf.setInt(InMemoryTransactionManager.CFG_TX_TIMEOUT, 1);
+    conf.setInt(InMemoryTransactionManager.CFG_TX_CLEANUP_INTERVAL, 2);
+    injector = TestHelper.getInjector(conf);
+  }
+
+  @ClassRule
+  public static TemporaryFolder tmpFolder = new TemporaryFolder();
 
   @Test
   public void testWordCount() throws Exception {
     final ApplicationWithPrograms app = TestHelper.deployApplicationWithManager(AppWithMapReduce.class);
 
+    // transaction manager is a "service" and must be started
+    injector.getInstance(InMemoryTransactionManager.class).init();
     OperationExecutor opex = injector.getInstance(OperationExecutor.class);
     LocationFactory locationFactory = injector.getInstance(LocationFactory.class);
+    DataSetAccessor dataSetAccessor = injector.getInstance(DataSetAccessor.class);
+    TransactionSystemClient txSystemClient = injector.getInstance(TransactionSystemClient.class);
     OperationContext opCtx = new OperationContext(DefaultId.ACCOUNT.getId(),
                                                   app.getAppSpecLoc().getSpecification().getName());
 
     String inputPath = createInput();
-    File outputDir = new File(FileUtils.getTempDirectory().getPath() + "/out_" + System.currentTimeMillis());
-    outputDir.deleteOnExit();
+    File outputDir = new File(tmpFolder.newFolder(), "output");
 
-    KeyValueTable jobConfigTable = (KeyValueTable) getTable(opex, opCtx, locationFactory, "jobConfig");
+    TransactionProxy proxy = new TransactionProxy();
+    DataSetInstantiator dataSetInstantiator =
+      new DataSetInstantiator(new DataFabricImpl(opex, locationFactory, dataSetAccessor, opCtx),
+                              proxy,
+                              getClass().getClassLoader());
+    dataSetInstantiator.setDataSets(ImmutableList.copyOf(new AppWithMapReduce().configure().getDataSets().values()));
+
+    TransactionAgent txAgent = new SynchronousTransactionAgent(opex, opCtx,
+                                                               dataSetInstantiator.getTransactionAware(),
+                                                               txSystemClient);
+    proxy.setTransactionAgent(txAgent);
+    KeyValueTable jobConfigTable = (KeyValueTable) dataSetInstantiator.getDataSet("jobConfig");
+
+    txAgent.start();
+
     jobConfigTable.write(tb("inputPath"), tb(inputPath));
     jobConfigTable.write(tb("outputPath"), tb(outputDir.getPath()));
+
+    txAgent.finish();
 
     runProgram(app, AppWithMapReduce.ClassicWordCount.class);
 
@@ -87,14 +122,31 @@ public class MapReduceProgramRunnerTest {
   public void testTimeSeriesRecordsCount() throws Exception {
     final ApplicationWithPrograms app = TestHelper.deployApplicationWithManager(AppWithMapReduce.class);
 
+    injector.getInstance(InMemoryTransactionManager.class).init();
     OperationExecutor opex = injector.getInstance(OperationExecutor.class);
     LocationFactory locationFactory = injector.getInstance(LocationFactory.class);
+    DataSetAccessor dataSetAccessor = injector.getInstance(DataSetAccessor.class);
+    TransactionSystemClient txSystemClient = injector.getInstance(TransactionSystemClient.class);
     OperationContext opCtx = new OperationContext(DefaultId.ACCOUNT.getId(),
                                                   app.getAppSpecLoc().getSpecification().getName());
 
-    TimeseriesTable table = (TimeseriesTable) getTable(opex, opCtx, locationFactory, "timeSeries");
+    TransactionProxy proxy = new TransactionProxy();
+    DataSetInstantiator dataSetInstantiator =
+      new DataSetInstantiator(new DataFabricImpl(opex, locationFactory, dataSetAccessor, opCtx),
+                              proxy,
+                              getClass().getClassLoader());
+    dataSetInstantiator.setDataSets(ImmutableList.copyOf(new AppWithMapReduce().configure().getDataSets().values()));
 
+    TransactionAgent txAgent = new SynchronousTransactionAgent(opex, opCtx,
+                                                               dataSetInstantiator.getTransactionAware(),
+                                                               txSystemClient);
+    proxy.setTransactionAgent(txAgent);
+
+    TimeseriesTable table = (TimeseriesTable) dataSetInstantiator.getDataSet("timeSeries");
+
+    txAgent.start();
     fillTestInputData(table);
+    txAgent.finish();
 
     Thread.sleep(2);
 
@@ -108,12 +160,17 @@ public class MapReduceProgramRunnerTest {
     expected.put("tag2", 3L);
     expected.put("tag3", 18L);
 
+    table = (TimeseriesTable) dataSetInstantiator.getDataSet("timeSeries");
+    txAgent.start();
+
     List<TimeseriesTable.Entry> agg = table.read(AggregateMetricsByTag.BY_TAGS, start, stop);
     Assert.assertEquals(expected.size(), agg.size());
     for (TimeseriesTable.Entry entry : agg) {
       String tag = Bytes.toString(entry.getTags()[0]);
       Assert.assertEquals((long) expected.get(tag), Bytes.toLong(entry.getValue()));
     }
+
+    txAgent.finish();
   }
 
   private void fillTestInputData(TimeseriesTable table) throws OperationException {
@@ -180,9 +237,7 @@ public class MapReduceProgramRunnerTest {
   }
 
   private String createInput() throws IOException {
-    File inputDir = new File(FileUtils.getTempDirectory().getPath() + "/in_" + System.currentTimeMillis());
-    inputDir.mkdirs();
-    inputDir.deleteOnExit();
+    File inputDir = tmpFolder.newFolder();
 
     File inputFile = new File(inputDir.getPath() + "/words.txt");
     inputFile.deleteOnExit();
@@ -198,15 +253,4 @@ public class MapReduceProgramRunnerTest {
     return inputDir.getPath();
   }
 
-  private DataSet getTable(OperationExecutor opex, OperationContext opCtx,
-                           LocationFactory locationFactory, String tableName) {
-    TransactionProxy proxy = new TransactionProxy();
-    proxy.setTransactionAgent(new SynchronousTransactionAgent(opex, opCtx));
-    DataSetInstantiator dataSetInstantiator = new DataSetInstantiator(new DataFabricImpl(opex, locationFactory, opCtx),
-                                                                      proxy,
-                                                                      getClass().getClassLoader());
-    dataSetInstantiator.setDataSets(ImmutableList.copyOf(new AppWithMapReduce().configure().getDataSets().values()));
-
-    return dataSetInstantiator.getDataSet(tableName);
-  }
 }

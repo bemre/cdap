@@ -41,6 +41,12 @@ log4js.configure({
 var logger = process.logger = log4js.getLogger('UI API');
 logger.setLevel(LOG_LEVEL);
 
+var LOG_DELAY = false;
+setInterval(function () {
+	LOG_DELAY = false;
+}, 5000);
+
+
 /**
  * Export API.
  */
@@ -74,7 +80,11 @@ logger.setLevel(LOG_LEVEL);
 
 			if (params.length === 2) {
 				var entityType = params.shift();
-				params[0] = new metadataservice_types[entityType](params[0]);
+				try {
+					params[0] = new metadataservice_types[entityType](params[0]);
+				} catch (e) {
+					logger.error(method, params, e);
+				}
 			}
 
 			if (method.indexOf('ByApplication') !== -1 || method === 'getFlows' || method === 'getFlow' ||
@@ -90,7 +100,7 @@ logger.setLevel(LOG_LEVEL);
 				try {
 					MetaData[method].apply(MetaData, params.concat(done));
 				} catch (e) {
-					logger.warn(done);
+					logger.warn(e);
 					done(e);
 				}
 			} else {
@@ -107,6 +117,10 @@ logger.setLevel(LOG_LEVEL);
 		params = params || [];
 		params.unshift(accountID);
 
+		if (params[4] === 'PROCEDURE') {
+			params[4] = 'QUERY';
+		}
+
 		var auth_token = new appfabricservice_types.AuthToken({ token: null });
 
 		var conn = thrift.createConnection(
@@ -117,8 +131,11 @@ logger.setLevel(LOG_LEVEL);
 		});
 
 		conn.on('error', function (error) {
-			logger.warn('Could not connect to AppFabric (Manager).');
-			done({'fatal': 'Could not connect to AppFabric (Manager).'});
+			if (!LOG_DELAY) {
+				logger.warn('Could not connect to AppFabric (Manager).');
+				done({'fatal': 'Could not connect to AppFabric (Manager).'});
+				LOG_DELAY = true;
+			}
 		});
 
 		conn.on('connect', function (response) {

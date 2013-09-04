@@ -7,6 +7,9 @@ import com.continuuity.data.operation.executor.OperationExecutor;
 import com.continuuity.data.operation.executor.SmartTransactionAgent;
 import com.continuuity.data.runtime.DataFabricModules;
 import com.continuuity.data.util.OperationUtil;
+import com.continuuity.data2.transaction.TransactionAware;
+import com.continuuity.data2.transaction.TransactionSystemClient;
+import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 
@@ -15,6 +18,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -24,6 +28,7 @@ import java.util.Map;
 public class SmartTransactionAgentTest {
 
   static OperationExecutor opex;
+  static TransactionSystemClient txSystemClient;
 
   /**
    * Sets up the in-memory operation executor and the data fabric.
@@ -33,11 +38,16 @@ public class SmartTransactionAgentTest {
     // use Guice to inject an in-memory opex
     final Injector injector =
       Guice.createInjector(new DataFabricModules().getInMemoryModules());
+    injector.getInstance(InMemoryTransactionManager.class).init();
     opex = injector.getInstance(OperationExecutor.class);
+    txSystemClient = injector.getInstance(TransactionSystemClient.class);
   }
 
   static SmartTransactionAgent newAgent() {
-    return new SmartTransactionAgent(opex, OperationUtil.DEFAULT);
+    return new SmartTransactionAgent(opex,
+                                     OperationUtil.DEFAULT,
+                                     Collections.<TransactionAware>emptyList(),
+                                     txSystemClient);
   }
 
   private static final byte[] a = { 'a' };

@@ -8,7 +8,11 @@ import com.continuuity.api.Application;
 import com.continuuity.api.ApplicationSpecification;
 import com.continuuity.api.flow.FlowSpecification;
 import com.continuuity.api.flow.FlowletDefinition;
+import com.continuuity.api.flow.flowlet.AbstractFlowlet;
+import com.continuuity.api.flow.flowlet.Flowlet;
 import com.continuuity.api.flow.flowlet.GeneratorFlowlet;
+import com.continuuity.api.procedure.AbstractProcedure;
+import com.continuuity.api.procedure.Procedure;
 import com.continuuity.api.procedure.ProcedureSpecification;
 import com.continuuity.app.Id;
 import com.continuuity.app.deploy.Manager;
@@ -21,6 +25,7 @@ import com.continuuity.app.services.ResourceIdentifier;
 import com.continuuity.app.services.ResourceInfo;
 import com.continuuity.archive.JarFinder;
 import com.continuuity.common.conf.CConfiguration;
+import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
 import com.continuuity.internal.app.BufferFileInputStream;
 import com.continuuity.internal.app.deploy.LocalManager;
 import com.continuuity.internal.app.deploy.pipeline.ApplicationWithPrograms;
@@ -37,6 +42,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
+import com.google.common.reflect.TypeToken;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
@@ -72,14 +78,18 @@ public class TestHelper {
   public static CConfiguration configuration;
   private static Injector injector;
 
-  static {
-    configuration = CConfiguration.create();
-    configuration.set("app.output.dir", TEMP_FOLDER.newFolder("app").getAbsolutePath());
-    configuration.set("app.tmp.dir", TEMP_FOLDER.newFolder("temp").getAbsolutePath());
-    injector = Guice.createInjector(new AppFabricTestModule(configuration));
+  public static Injector getInjector() {
+    return getInjector(CConfiguration.create());
   }
 
-  public static Injector getInjector() {
+  public static synchronized Injector getInjector(CConfiguration conf) {
+    if (injector == null) {
+      configuration = conf;
+      configuration.set("app.output.dir", TEMP_FOLDER.newFolder("app").getAbsolutePath());
+      configuration.set("app.tmp.dir", TEMP_FOLDER.newFolder("temp").getAbsolutePath());
+      injector = Guice.createInjector(new AppFabricTestModule(configuration));
+      injector.getInstance(InMemoryTransactionManager.class).init();
+    }
     return injector;
   }
 
@@ -100,7 +110,7 @@ public class TestHelper {
    * @return Returns an instance of {@link LocalManager}
    */
   public static Manager<Location, ApplicationWithPrograms> getLocalManager() {
-    ManagerFactory factory = injector.getInstance(ManagerFactory.class);
+    ManagerFactory factory = getInjector().getInstance(ManagerFactory.class);
     return factory.create();
   }
 
@@ -129,8 +139,8 @@ public class TestHelper {
    */
   public static void deployApplication(Class<? extends Application> applicationClz, String fileName) throws Exception {
     Location deployedJar =
-      deployApplication(injector.getInstance(AppFabricService.Iface.class),
-                        injector.getInstance(com.continuuity.weave.filesystem.LocationFactory.class), DefaultId.ACCOUNT,
+      deployApplication(getInjector().getInstance(AppFabricService.Iface.class),
+                        getInjector().getInstance(LocationFactory.class), DefaultId.ACCOUNT,
                         DUMMY_AUTH_TOKEN, "", fileName, applicationClz);
     deployedJar.delete(true);
   }
@@ -141,8 +151,8 @@ public class TestHelper {
   public static void deployApplication(final Id.Account account, final AuthToken token,
                                        Class<? extends Application> applicationClz, String fileName) throws Exception {
     Location deployedJar =
-      deployApplication(injector.getInstance(AppFabricService.Iface.class),
-                        injector.getInstance(com.continuuity.weave.filesystem.LocationFactory.class), account, token,
+      deployApplication(getInjector().getInstance(AppFabricService.Iface.class),
+                        getInjector().getInstance(LocationFactory.class), account, token,
                         "", fileName, applicationClz);
     deployedJar.delete(true);
   }
@@ -169,7 +179,7 @@ public class TestHelper {
 
       Application application = applicationClz.newInstance();
       ApplicationSpecification appSpec = application.configure();
-      Location deployedJar = locationFactory.create(createDeploymentJar(applicationClz, appSpec).getAbsolutePath());
+      Location deployedJar = locationFactory.create(createDeploymentJar(applicationClz, appSpec).toURI());
 
       ResourceIdentifier id = appFabricServer.init(
         token, new ResourceInfo(account, applicationId, fileName, 0, System.currentTimeMillis()));
@@ -280,14 +290,25 @@ public class TestHelper {
     Map<String, String> flowletClassNames = Maps.newHashMap();
     for (FlowSpecification flowSpec : appSpec.getFlows().values()) {
       for (FlowletDefinition flowletDef : flowSpec.getFlowlets().values()) {
-        flowletClassNames.put(flowletDef.getFlowletSpec().getClassName(), flowSpec.getName());
+        String className = flowletDef.getFlowletSpec().getClassName();
+        // Walk up class hierachy and put all the parent classes that are Flowlet type into the map
+        for (TypeToken<?> type : TypeToken.of(Class.forName(className)).getTypes().classes()) {
+          if (Flowlet.class.isAssignableFrom(type.getRawType()) && !type.getRawType().equals(AbstractFlowlet.class)) {
+            flowletClassNames.put(type.getRawType().getName(), flowSpec.getName());
+          }
+        }
       }
     }
 
     // Find all procedure classes
     Set<String> procedureClassNames = Sets.newHashSet();
     for (ProcedureSpecification procedureSpec : appSpec.getProcedures().values()) {
-      procedureClassNames.add(procedureSpec.getClassName());
+      String className = procedureSpec.getClassName();
+      for (TypeToken<?> type : TypeToken.of(Class.forName(className)).getTypes().classes()) {
+        if (Procedure.class.isAssignableFrom(type.getRawType()) && !type.getRawType().equals(AbstractProcedure.class)) {
+          procedureClassNames.add(type.getRawType().getName());
+        }
+      }
     }
 
     FlowletRewriter flowletRewriter = new FlowletRewriter(appSpec.getName(), false);

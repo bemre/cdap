@@ -38,6 +38,15 @@ define([], function () {
 
 		}.property('currentState').cacheable(false),
 
+		/*
+		 * Runnable context path, used by user-defined metrics.
+		 */
+		context: function () {
+
+			return this.interpolate('/apps/{parent}/flows/{id}');
+
+		}.property('app', 'name'),
+
 		interpolate: function (path) {
 
 			return path.replace(/\{parent\}/, this.get('app'))
@@ -63,7 +72,9 @@ define([], function () {
 				function (response) {
 
 					if (response.result) {
-						self.set('currentState', response.result.status);
+						if (self.get('name') === response.result.flowId) {
+							self.set('currentState', response.result.status);
+						}
 					}
 
 			});

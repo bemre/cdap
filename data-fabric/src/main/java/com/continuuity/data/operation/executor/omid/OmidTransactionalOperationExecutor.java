@@ -60,6 +60,7 @@ import com.continuuity.data.operation.ttqueue.admin.QueueInfo;
 import com.continuuity.data.table.OVCTableHandle;
 import com.continuuity.data.table.OrderedVersionedColumnarTable;
 import com.continuuity.data.table.Scanner;
+import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
 import com.google.common.base.Charsets;
 import com.google.common.base.Objects;
 import com.google.common.cache.CacheBuilder;
@@ -76,6 +77,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -93,7 +95,7 @@ import java.util.concurrent.TimeUnit;
 public class OmidTransactionalOperationExecutor
   implements TransactionalOperationExecutor {
 
-  private static final Logger Log
+  private static final Logger LOG
     = LoggerFactory.getLogger(OmidTransactionalOperationExecutor.class);
 
   public String getName() {
@@ -123,7 +125,8 @@ public class OmidTransactionalOperationExecutor
   static int maxDequeueRetries = 200;
   static long dequeueRetrySleep = 5;
 
-  // Defines whether this opex talks to oracle or not. With current implementation if set to false the only difference
+  // Defines whether this opex talks
+  // to oracle or not. With current implementation if set to false the only difference
   // is that transaction validation doesn't happen through oracle.
   // TODO: Ideally we should also forbid oracle-related ops, like starting/aborting transactions, but now too many
   //       things (like accessing meta table, etc.) mixed in this sinlge class which makes it hard to do.
@@ -142,10 +145,15 @@ public class OmidTransactionalOperationExecutor
   private MetricsCollectionService metricsCollectionService;
   private MetricsCollector streamMetrics;
   private MetricsCollector dataSetMetrics;
+  private MetricsCollector txSystemMetrics;
+
+  private final InMemoryTransactionManager txManager;
 
   @Inject
-  public OmidTransactionalOperationExecutor(TransactionOracle oracle, OVCTableHandle tableHandle, CConfiguration conf) {
+  public OmidTransactionalOperationExecutor(TransactionOracle oracle, InMemoryTransactionManager txManager,
+                                            OVCTableHandle tableHandle, CConfiguration conf) {
     this.oracle = oracle;
+    this.txManager = txManager;
     this.tableHandle = tableHandle;
     this.minTableWriteOpsToBatch = conf.getInt(Constants.CFG_DATA_TABLE_WRITE_OPS_BATCH_MIN_SIZE,
                                                Constants.DEFAULT_DATA_TABLE_WRITE_OPS_BATCH_MIN_SIZE);
@@ -156,6 +164,8 @@ public class OmidTransactionalOperationExecutor
 
     this.streamMetrics = createNoopMetricsCollector();
     this.dataSetMetrics = createNoopMetricsCollector();
+    this.txSystemMetrics = createNoopMetricsCollector();
+    startTxSystemMetricsReporter();
   }
 
   // Optional injection of MetricsCollectionService
@@ -164,6 +174,7 @@ public class OmidTransactionalOperationExecutor
     this.metricsCollectionService = metricsCollectionService;
     this.streamMetrics = metricsCollectionService.getCollector(MetricsScope.REACTOR, STREAM_CONTEXT, "0");
     this.dataSetMetrics = metricsCollectionService.getCollector(MetricsScope.REACTOR, DATASET_CONTEXT, "0");
+    this.txSystemMetrics = metricsCollectionService.getCollector(MetricsScope.REACTOR, TX_CONTEXT, "0");
   }
 
   private MetricsCollector createNoopMetricsCollector() {
@@ -242,6 +253,9 @@ public class OmidTransactionalOperationExecutor
     METRIC_PREFIX + "QueueDropInflight" + LATENCY_METRIC_SUFFIX;
   public static final String REQ_TYPE_SCAN_LATENCY = METRIC_PREFIX + "Scan" + LATENCY_METRIC_SUFFIX;
 
+  // TxDs2 Metrics
+  private static final String TX_CONTEXT = "-.tx";
+
   // Expiration seconds of cache queue metrics entries after it's been accessed.
   // It's to avoid keeping unused MetricsCollector for queues that are not active.
   private static final long QUEUE_METRICS_EXPIRES_SECONDS = 60;
@@ -273,7 +287,7 @@ public class OmidTransactionalOperationExecutor
                 .build(new CacheLoader<String, MetricsCollector>() {
       @Override
       public MetricsCollector load(String group) throws Exception {
-        Log.trace("Created new MetricsCollector for group '{}'.", group);
+        LOG.trace("Created new MetricsCollector for group '{}'.", group);
         if (metricsCollectionService != null) {
           return metricsCollectionService.getCollector(MetricsScope.REACTOR, group, "0");
         } else {
@@ -297,7 +311,7 @@ public class OmidTransactionalOperationExecutor
       queueMetricNames.putIfAbsent(queue, new ImmutablePair<String, String>
           ("q.enqueue." + name, "q.ack." + name));
       names = queueMetricNames.get(queue);
-      Log.trace("using metric name '{}' and '{}' for queue '{}'",
+      LOG.trace("using metric name '{}' and '{}' for queue '{}'",
                 names.getFirst(), names.getSecond(), new String(queue));
     }
     return names;
@@ -780,7 +794,6 @@ public class OmidTransactionalOperationExecutor
     // to do this in different order form original as the ops are executed on different tables
     // NOTE: executing queue ops later allows us to have better performance because it is hard to undo them.
     int tableOps = 0;
-    WriteTransactionResult writeTxReturn = null;
     // buffer table write ops for later execution
     Map<String, List<WriteOperation>> tableWriteOperations = Maps.newHashMap();
     List<WriteOperation> nonTableOps = Lists.newArrayList();
@@ -797,6 +810,7 @@ public class OmidTransactionalOperationExecutor
 
     // Dispatching table write ops
     boolean abort = false;
+    WriteTransactionResult writeTxReturn;
     if (tableOps < minTableWriteOpsToBatch) {
       writeTxReturn = dispatchTableWritesInBatches(context, transaction, tableWriteOperations);
     } else {
@@ -1402,6 +1416,75 @@ public class OmidTransactionalOperationExecutor
     end(REQ_TYPE_SCAN_LATENCY, begin);
     dataSetMetric_read(scan.getMetricName());
     return scanner;
+  }
+
+
+  @Override
+  public com.continuuity.data2.transaction.Transaction start(Integer timeout) throws OperationException {
+    txSystemMetrics.gauge("tx.start.ops", 1);
+    return txManager.start(timeout);
+  }
+
+  @Override
+  public com.continuuity.data2.transaction.Transaction start() throws OperationException {
+    txSystemMetrics.gauge("tx.start.ops", 1);
+    return txManager.start();
+  }
+
+  @Override
+  public boolean canCommit(com.continuuity.data2.transaction.Transaction tx, Collection<byte[]> changeIds)
+    throws OperationException {
+    txSystemMetrics.gauge("tx.canCommit.ops", 1);
+    boolean canCommit = txManager.canCommit(tx, changeIds);
+    if (canCommit) {
+      txSystemMetrics.gauge("tx.canCommit.successful", 1);
+    }
+    return canCommit;
+  }
+
+  @Override
+  public boolean commit(com.continuuity.data2.transaction.Transaction tx) throws OperationException {
+    txSystemMetrics.gauge("tx.commit.ops", 1);
+    boolean committed = txManager.commit(tx);
+    if (committed) {
+      txSystemMetrics.gauge("tx.commit.successful", 1);
+    }
+    return committed;
+  }
+
+  @Override
+  public boolean abort(com.continuuity.data2.transaction.Transaction tx) throws OperationException {
+    txSystemMetrics.gauge("tx.abort.ops", 1);
+    boolean aborted = txManager.abort(tx);
+    if (aborted) {
+      txSystemMetrics.gauge("tx.abort.successful", 1);
+    }
+    return aborted;
+  }
+
+  // this is a hack for reporting gauge metric: current metrics system supports only counters that are aggregated on
+  // 10-sec basis, so we need to report gauge not more frequently than every 10 sec.
+  private void startTxSystemMetricsReporter() {
+    Thread txSystemMetricsReporter = new Thread("tx-reporter") {
+      @Override
+      public void run() {
+        while (true) {
+          int excludedListSize = txManager.getExcludedListSize();
+          if (txSystemMetrics != null && excludedListSize > 0) {
+            txSystemMetrics.gauge("tx.excluded", excludedListSize);
+          }
+          txManager.logStatistics();
+          try {
+            TimeUnit.SECONDS.sleep(10);
+          } catch (InterruptedException e) {
+            this.interrupt();
+            break;
+          }
+        }
+      }
+    };
+    txSystemMetricsReporter.setDaemon(true);
+    txSystemMetricsReporter.start();
   }
 
   Transaction startTransaction(boolean trackChanges) {

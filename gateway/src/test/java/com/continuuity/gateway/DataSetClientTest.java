@@ -3,7 +3,10 @@ package com.continuuity.gateway;
 import com.continuuity.api.data.OperationException;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.utils.PortDetector;
+import com.continuuity.data.DataSetAccessor;
 import com.continuuity.data.operation.executor.OperationExecutor;
+import com.continuuity.data2.transaction.TransactionSystemClient;
+import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
 import com.continuuity.gateway.accessor.DatasetRestAccessor;
 import com.continuuity.gateway.tools.DataClient;
 import com.continuuity.gateway.tools.DataSetClient;
@@ -34,6 +37,7 @@ public class DataSetClientTest {
 
     // Set up our Guice injections
     Injector injector = Guice.createInjector(new GatewayTestModule(configuration));
+    injector.getInstance(InMemoryTransactionManager.class).init();
     executor = injector.getInstance(OperationExecutor.class);
 
     final String name = "access.rest";
@@ -54,6 +58,8 @@ public class DataSetClientTest {
     // and make sure to pass the data fabric executor to the gateway.
     gateway = new Gateway();
     gateway.setExecutor(executor);
+    gateway.setDataSetAccessor(injector.getInstance(DataSetAccessor.class));
+    gateway.setTxSystemClient(injector.getInstance(TransactionSystemClient.class));
     gateway.setConsumer(new TestUtil.NoopConsumer());
     gateway.setDiscoveryServiceClient(injector.getInstance(DiscoveryServiceClient.class));
     gateway.start(null, configuration);

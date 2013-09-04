@@ -22,6 +22,7 @@ define([], function () {
 			this.set('elements.Stream', Em.ArrayProxy.create({content: []}));
 			this.set('elements.Procedure', Em.ArrayProxy.create({content: []}));
 			this.set('elements.Dataset', Em.ArrayProxy.create({content: []}));
+			this.clearTriggers(true);
 
 			var self = this;
 			var model = this.get('model');
@@ -130,9 +131,17 @@ define([], function () {
 
 		},
 
-		updateStats: function () {
+		ajaxCompleted: function () {
+			return this.get('timeseriesCompleted') && this.get('aggregatesCompleted');
+		},
 
-			if (C.currentPath !== 'App') {
+		clearTriggers: function (value) {
+			this.set('timeseriesCompleted', value);
+			this.set('aggregatesCompleted', value);
+		},
+
+		updateStats: function () {
+			if (!this.ajaxCompleted() || C.currentPath !== 'App') {
 				return;
 			}
 
@@ -157,266 +166,82 @@ define([], function () {
 				/*
 				 * End hax
 				 */
-
+				this.clearTriggers(false);
 				// Scans models for timeseries metrics and updates them.
-				C.Util.updateTimeSeries(models, this.HTTP);
+				C.Util.updateTimeSeries(models, this.HTTP, this);
 
 				// Scans models for aggregate metrics and udpates them.
-				C.Util.updateAggregates(models, this.HTTP);
+				C.Util.updateAggregates(models, this.HTTP, this);
 
 			}
 
 		},
 
-		startAllFlows: function (done) {
+		hasRunnables: function () {
 
-			var flows = this.get('elements.Flow').content;
-			var toSend = flows.length;
-			var toReceive = toSend;
+			var flow = this.get('elements.Flow.content');
+			var mapreduce = this.get('elements.Batch.content');
+			var procedure = this.get('elements.Procedure.content');
 
-			if (!toSend) {
+			if (!flow.length && !mapreduce.length && !procedure.length) {
+				return false;
+			}
+			return true;
 
-				done();
+		}.property('elements.Flow', 'elements.Batch', 'elements.Procedure'),
 
-			} else {
+		transition: function (elements, action, transition, endState, done) {
 
-				var requested = false;
+			var i = elements.length, model, app = this.get('model.id');
+			var remaining = i;
 
-				while(toSend--) {
+			var HTTP = this.HTTP;
 
-					flows[toSend].set('currentState', 'STARTING');
+			while (i--) {
 
-					C.socket.request('manager', {
-						method: 'start',
-						params: [flows[toSend].app, flows[toSend].name, -1, 'FLOW']
-					}, function (error, response, flow) {
-
-						flow.set('currentState', 'RUNNING');
-
-						if (!--toReceive) {
-
-							done();
-
-						}
-
-					}, flows[toSend]);
+				if (elements[i].get('currentState') === transition ||
+					elements[i].get('currentState') === endState) {
+					remaining --;
+					continue;
 				}
-			}
 
-		},
+				(function () {
 
-		stopAllFlows: function (done) {
+					var model = elements[i];
+					model.set('currentState', transition);
 
-			var flows = this.get('elements.Flow').content;
-			var toSend = flows.length;
-			var toReceive = toSend;
+					HTTP.rpc('runnable', action, [app, model.get('name'),
+						model.get('version'), model.get('type').toUpperCase()],
+						function (response) {
 
-			if (!toSend) {
-
-				done();
-
-			} else {
-
-				var requested = false;
-
-				while(toSend--) {
-
-					if (flows[toSend].get('currentState') !== 'STOPPED') {
-
-						requested = true;
-
-						flows[toSend].set('currentState', 'STOPPING');
-
-						C.socket.request('manager', {
-							method: 'stop',
-							params: [flows[toSend].app, flows[toSend].name, -1, 'FLOW']
-						}, function (error, response, flow) {
-
-							flow.set('currentState', 'STOPPED');
-
-							if (!--toReceive) {
-
+							model.set('currentState', endState);
+							if (!--remaining && typeof done === 'function') {
 								done();
-
 							}
 
-						}, flows[toSend]);
-					}
-				}
+					});
 
-				if (!requested) {
-					done();
-				}
+				})();
 
 			}
 
 		},
 
-		startAllBatches: function (done) {
+		startAll: function (kind) {
 
-			var batches = this.get('elements.Batch').content;
-			var toSend = batches.length;
-			var toReceive = toSend;
+			var elements = this.get('elements.' + kind + '.content');
 
-			if (!toSend) {
-
-				done();
-
-			} else {
-
-				var requested = false;
-
-				while(toSend--) {
-
-					batches[toSend].set('currentState', 'STARTING');
-
-					C.socket.request('manager', {
-						method: 'start',
-						params: [batches[toSend].app, batches[toSend].name, -1, 'BATCH']
-					}, function (error, response, batch) {
-
-						batch.set('currentState', 'RUNNING');
-
-						if (!--toReceive) {
-
-							done();
-
-						}
-
-					}, batches[toSend]);
-				}
-			}
+			C.Util.interrupt();
+			this.transition(elements, 'start', 'starting', 'running', C.Util.proceed);
 
 		},
 
-		stopAllBatches: function (done) {
+		stopAll: function (kind) {
 
-			var batches = this.get('elements.Batch').content;
-			var toSend = batches.length;
-			var toReceive = toSend;
+			var elements = this.get('elements.' + kind + '.content');
 
-			if (!toSend) {
-
-				done();
-
-			} else {
-
-				var requested = false;
-
-				while(toSend--) {
-
-					if (batches[toSend].get('currentState') !== 'STOPPED') {
-
-						requested = true;
-
-						batches[toSend].set('currentState', 'STOPPING');
-
-						C.socket.request('manager', {
-							method: 'stop',
-							params: [batches[toSend].app, batches[toSend].name, -1, 'BATCH']
-						}, function (error, response, batch) {
-
-							batch.set('currentState', 'STOPPED');
-
-							if (!--toReceive) {
-
-								done();
-
-							}
-
-						}, batches[toSend]);
-					}
-				}
-
-				if (!requested) {
-					done();
-				}
-
-			}
-
-		},
-
-		startAllProcedures: function (done) {
-
-			var procedures = this.get('elements.Procedure').content;
-			var toSend = procedures.length;
-			var toReceive = toSend;
-
-			if (!toSend) {
-
-				done();
-
-			} else {
-
-				var requested = false;
-
-				while(toSend--) {
-
-					procedures[toSend].set('currentState', 'STARTING');
-
-					C.socket.request('manager', {
-						method: 'start',
-						params: [procedures[toSend].app, procedures[toSend].name, -1, 'FLOW']
-					}, function (error, response, flow) {
-
-						flow.set('currentState', 'RUNNING');
-
-						if (!--toReceive) {
-
-							done();
-
-						}
-
-					}, procedures[toSend]);
-				}
-			}
-
-		},
-
-		stopAllProcedures: function (done) {
-
-			var procedures = this.get('elements.Procedure').content;
-			var toSend = procedures.length;
-			var toReceive = toSend;
-
-			if (!toSend) {
-
-				done();
-
-			} else {
-
-				var requested = false;
-
-				while(toSend--) {
-
-					if (procedures[toSend].get('currentState') !== 'STOPPED') {
-
-						requested = true;
-
-						procedures[toSend].set('currentState', 'STOPPING');
-
-						C.socket.request('manager', {
-							method: 'stop',
-							params: [procedures[toSend].app, procedures[toSend].name, -1, 'QUERY']
-						}, function (error, response, procedure) {
-
-							procedure.set('currentState', 'STOPPED');
-
-							if (!--toReceive) {
-
-								done();
-
-							}
-
-						}, procedures[toSend]);
-					}
-				}
-
-				if (!requested) {
-					done();
-				}
-
-			}
+			C.Util.interrupt();
+			this.transition(elements, 'stop', 'stopping', 'stopped', C.Util.proceed);
 
 		},
 

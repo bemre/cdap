@@ -43,10 +43,13 @@ import com.continuuity.app.store.Store;
 import com.continuuity.app.store.StoreFactory;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.conf.Constants;
+import com.continuuity.common.discovery.RandomEndpointStrategy;
+import com.continuuity.common.discovery.TimeLimitEndpointStrategy;
 import com.continuuity.common.utils.StackTraceUtil;
 import com.continuuity.data.operation.ClearFabric;
 import com.continuuity.data.operation.OperationContext;
 import com.continuuity.data.operation.executor.OperationExecutor;
+import com.continuuity.data2.transaction.queue.QueueAdmin;
 import com.continuuity.internal.UserErrors;
 import com.continuuity.internal.UserMessages;
 import com.continuuity.internal.app.deploy.SessionInfo;
@@ -129,6 +132,11 @@ public class DefaultAppFabricService implements AppFabricService.Iface {
   private static final Logger LOG = LoggerFactory.getLogger(DefaultAppFabricService.class);
 
   /**
+   * Number of seconds for timing out a service endpoint discovery.
+   */
+  private static final long DISCOVERY_TIMEOUT_SECONDS = 3;
+
+  /**
    * Maintains a mapping of transient session state. The state is stored in memory,
    * in case of failure, all the current running sessions will be terminated. As
    * per the current implementation only connection per account is allowed to upload.
@@ -185,6 +193,9 @@ public class DefaultAppFabricService implements AppFabricService.Iface {
    */
   private final String archiveDir;
 
+  // We need it here now to be able to reset queues data
+  private final QueueAdmin queueAdmin;
+
   /**
    * Timeout to upload to remote app fabric.
    */
@@ -202,7 +213,8 @@ public class DefaultAppFabricService implements AppFabricService.Iface {
   public DefaultAppFabricService(CConfiguration configuration, OperationExecutor opex,
                                  LocationFactory locationFactory, ManagerFactory managerFactory,
                                  AuthorizationFactory authFactory, StoreFactory storeFactory,
-                                 ProgramRuntimeService runtimeService, DiscoveryServiceClient discoveryServiceClient) {
+                                 ProgramRuntimeService runtimeService, DiscoveryServiceClient discoveryServiceClient,
+                                 QueueAdmin queueAdmin) {
     this.opex = opex;
     this.locationFactory = locationFactory;
     this.configuration = configuration;
@@ -210,6 +222,7 @@ public class DefaultAppFabricService implements AppFabricService.Iface {
     this.authFactory = authFactory;
     this.runtimeService = runtimeService;
     this.discoveryServiceClient = discoveryServiceClient;
+    this.queueAdmin = queueAdmin;
     this.store = storeFactory.create();
     this.archiveDir = configuration.get(Constants.CFG_APP_FABRIC_OUTPUT_DIR, System.getProperty("java.io.tmpdir"))
                                           + "/archive";
@@ -1048,6 +1061,9 @@ public class DefaultAppFabricService implements AppFabricService.Iface {
       deleteMetrics(account);
       // delete all meta data
       store.removeAll(accountId);
+      // delete queues data
+      queueAdmin.dropAll();
+
       LOG.info("Deleting all data for account '" + account + "'.");
       opex.execute(
         new OperationContext(account),
@@ -1072,7 +1088,14 @@ public class DefaultAppFabricService implements AppFabricService.Iface {
   private void deleteMetrics(String accountId) throws IOException, TException, MetadataServiceException {
 
     List<Application> applications = this.mds.getApplications(new Account(accountId));
-    Discoverable discoverable = this.discoveryServiceClient.discover(Constants.SERVICE_METRICS).iterator().next();
+    Iterable<Discoverable> discoverables = this.discoveryServiceClient.discover(Constants.SERVICE_METRICS);
+    Discoverable discoverable = new TimeLimitEndpointStrategy(new RandomEndpointStrategy(discoverables),
+                                                              DISCOVERY_TIMEOUT_SECONDS, TimeUnit.SECONDS).pick();
+
+    if (discoverable == null) {
+      LOG.error("Fail to get any metrics endpoint for deleting metrics.");
+      return;
+    }
 
     for (Application application : applications){
       String url = String.format("http://%s:%d/metrics/app/%s",
@@ -1100,7 +1123,15 @@ public class DefaultAppFabricService implements AppFabricService.Iface {
 
 
   private void deleteMetrics(String account, String application) throws IOException {
-    Discoverable discoverable = this.discoveryServiceClient.discover(Constants.SERVICE_METRICS).iterator().next();
+    Iterable<Discoverable> discoverables = this.discoveryServiceClient.discover(Constants.SERVICE_METRICS);
+    Discoverable discoverable = new TimeLimitEndpointStrategy(new RandomEndpointStrategy(discoverables),
+                                                              DISCOVERY_TIMEOUT_SECONDS, TimeUnit.SECONDS).pick();
+
+    if (discoverable == null) {
+      LOG.error("Fail to get any metrics endpoint for deleting metrics.");
+      return;
+    }
+
     String url = String.format("http://%s:%d/metrics/app/%s",
                                     discoverable.getSocketAddress().getHostName(),
                                     discoverable.getSocketAddress().getPort(),

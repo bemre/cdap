@@ -2,7 +2,7 @@
  * Batch Model
  */
 
-define(['lib/date'], function (Datejs) {
+define(['core/lib/date'], function (Datejs) {
 
   var METRICS_PATHS = {
     //'/process/busyness/{{appId}}/mapreduce/{{jobId}}?count=30': 'busyness',
@@ -88,6 +88,15 @@ define(['lib/date'], function (Datejs) {
       this.get('metricData').set(name, value);
 
     },
+
+    /*
+     * Runnable context path, used by user-defined metrics.
+     */
+    context: function () {
+
+      return this.interpolate('/apps/{parent}/flows/{id}');
+
+    }.property('app', 'name'),
 
     interpolate: function (path) {
 

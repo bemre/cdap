@@ -48,6 +48,9 @@ import com.continuuity.data.operation.ttqueue.admin.QueueConfigure;
 import com.continuuity.data.operation.ttqueue.admin.QueueConfigureGroups;
 import com.continuuity.data.operation.ttqueue.admin.QueueDropInflight;
 import com.continuuity.data.operation.ttqueue.admin.QueueInfo;
+import com.google.common.base.Function;
+import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import org.apache.thrift.TException;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.apache.thrift.protocol.TProtocol;
@@ -56,6 +59,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.nio.ByteBuffer;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -71,6 +75,12 @@ import static com.continuuity.common.metrics.MetricsHelper.Status.Success;
 public class OperationExecutorClient extends ConverterUtils {
 
   private static final Logger Log = LoggerFactory.getLogger(OperationExecutorClient.class);
+  private static final Function<byte[], ByteBuffer> BYTES_WRAPPER = new Function<byte[], ByteBuffer>() {
+    @Override
+    public ByteBuffer apply(byte[] input) {
+      return ByteBuffer.wrap(input);
+    }
+  };
 
   /**
    * The thrift transport layer. We need this when we close the connection.
@@ -924,4 +934,46 @@ public class OperationExecutorClient extends ConverterUtils {
   public String getName() {
     return "remote-client";
   }
+
+  public com.continuuity.data2.transaction.Transaction start() throws OperationException, TException {
+    try {
+      return unwrap(client.startTx());
+    } catch (TOperationException te) {
+      throw unwrap(te);
+    }
+  }
+
+  public com.continuuity.data2.transaction.Transaction start(Integer timeout) throws OperationException, TException {
+    try {
+      return unwrap(client.startTxTimeout(timeout == null ? -1 : timeout));
+    } catch (TOperationException te) {
+      throw unwrap(te);
+    }
+  }
+
+  public boolean canCommit(com.continuuity.data2.transaction.Transaction tx, Collection<byte[]> changeIds)
+    throws OperationException, TException{
+    try {
+      return client.canCommitTx(wrap(tx), ImmutableSet.copyOf(Iterables.transform(changeIds, BYTES_WRAPPER)));
+    } catch (TOperationException te) {
+      throw unwrap(te);
+    }
+  }
+
+  public boolean commit(com.continuuity.data2.transaction.Transaction tx) throws OperationException, TException {
+    try {
+      return client.commitTx(wrap(tx));
+    } catch (TOperationException te) {
+      throw unwrap(te);
+    }
+  }
+
+  public boolean abort(com.continuuity.data2.transaction.Transaction tx) throws OperationException, TException {
+    try {
+      return client.abortTx(wrap(tx));
+    } catch (TOperationException te) {
+      throw unwrap(te);
+    }
+  }
+
 }

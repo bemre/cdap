@@ -19,6 +19,9 @@ public class Constants {
   public static final String
       SERVICE_APPFABRIC_SERVER = "app-fabric-service";
 
+  public static final String
+      SERVICE_TRANSACTION_SERVER = "tx-service";
+
   // Used by the new metrics system. Will deprecate the old one.
   public static final String SERVICE_METRICS = "metricsservice";
 
@@ -40,7 +43,12 @@ public class Constants {
   public static final String CFG_COMMAND_PORT_ENABLED =
     "command.port.enabled";
 
+  public static final String CFG_LOCAL_DATA_DIR = "local.data.dir";
+
+  public static final String CFG_YARN_USER = "yarn.user";
   public static final String CFG_HDFS_USER = "hdfs.user";
+  public static final String CFG_HDFS_NAMESPACE = "hdfs.namespace";
+  public static final String CFG_WEAVE_ZK_NAMESPACE = "weave.zookeeper.namespace";
 
   /**
    * Default constants for common.
@@ -85,6 +93,7 @@ public class Constants {
   public static final String CFG_DATA_LEVELDB_DIR = "data.local.leveldb";
   public static final String CFG_DATA_LEVELDB_BLOCKSIZE = "data.local.leveldb.blocksize";
   public static final String CFG_DATA_LEVELDB_CACHESIZE = "data.local.leveldb.cachesize";
+  public static final String CFG_DATA_LEVELDB_FSYNC = "data.local.leveldb.fsync";
   public static final String CFG_DATA_HSQLDB_CACHE_ROWS = "data.local.hsqldb.cache_rows";
   public static final String CFG_DATA_HSQLDB_CACHE_SIZE = "data.local.hsqldb.cache_size";
   /** Minimum count of table write ops executed by opex to try to apply batching logic to. */
@@ -105,6 +114,7 @@ public class Constants {
   public static final String DEFAULT_DATA_LEVELDB_DIR = "data";
   public static final int DEFAULT_DATA_LEVELDB_BLOCKSIZE = 1024;
   public static final long DEFAULT_DATA_LEVELDB_CACHESIZE = 1024 * 1024 * 100;
+  public static final boolean DEFAULT_DATA_LEVELDB_FSYNC = true;
   public static final long DEFAULT_DATA_HSQLDB_CACHE_ROWS = 64000;
   public static final long DEFAULT_DATA_HSQLDB_CACHE_SIZE = 64000;
   /** I.e. by default do NOT attempt to batch table write ops. */

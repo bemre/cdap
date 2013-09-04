@@ -3,25 +3,25 @@
  */
 package com.continuuity;
 
-import com.continuuity.common.metrics.MetricsCollectionService;
 import com.continuuity.app.guice.AppFabricServiceRuntimeModule;
-import com.continuuity.app.guice.LocationRuntimeModule;
 import com.continuuity.app.guice.ProgramRunnerRuntimeModule;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.conf.Constants;
 import com.continuuity.common.guice.ConfigModule;
 import com.continuuity.common.guice.DiscoveryRuntimeModule;
 import com.continuuity.common.guice.IOModule;
+import com.continuuity.common.guice.LocationRuntimeModule;
+import com.continuuity.common.metrics.MetricsCollectionService;
 import com.continuuity.common.service.ServerException;
 import com.continuuity.common.utils.Copyright;
 import com.continuuity.common.utils.StackTraceUtil;
-import com.continuuity.data.runtime.DataFabricLevelDBModule;
 import com.continuuity.data.runtime.DataFabricModules;
+import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
 import com.continuuity.gateway.Gateway;
 import com.continuuity.gateway.runtime.GatewayModules;
 import com.continuuity.internal.app.services.AppFabricServer;
 import com.continuuity.logging.appender.LogAppenderInitializer;
-import com.continuuity.logging.runtime.LoggingModules;
+import com.continuuity.logging.guice.LoggingModules;
 import com.continuuity.metadata.MetadataServerInterface;
 import com.continuuity.metrics.guice.MetricsClientRuntimeModule;
 import com.continuuity.metrics.guice.MetricsQueryRuntimeModule;
@@ -53,7 +53,6 @@ import java.util.concurrent.TimeUnit;
  */
 public class SingleNodeMain {
   private static final Logger LOG = LoggerFactory.getLogger(SingleNodeMain.class);
-  private static final String ZOOKEEPER_DATA_DIR = "data/zookeeper";
 
   private final WebCloudAppService webCloudAppService;
   private final CConfiguration configuration;
@@ -67,6 +66,7 @@ public class SingleNodeMain {
   private final MetricsQueryService metricsQueryService;
 
   private final LogAppenderInitializer logAppenderInitializer;
+  private final InMemoryTransactionManager transactionManager;
 
   private InMemoryZKServer zookeeper;
 
@@ -75,6 +75,7 @@ public class SingleNodeMain {
     this.webCloudAppService = new WebCloudAppService();
 
     Injector injector = Guice.createInjector(modules);
+    transactionManager = injector.getInstance(InMemoryTransactionManager.class);
     gateway = injector.getInstance(Gateway.class);
     overlordCollection = injector.getInstance(MetricsCollectionServerInterface.class);
     overloadFrontend = injector.getInstance(MetricsFrontendServerInterface.class);
@@ -94,6 +95,14 @@ public class SingleNodeMain {
           LOG.error(StackTraceUtil.toStringStackTrace(e));
           System.err.println("Failed to shutdown node web cloud app");
         }
+        try {
+          transactionManager.close();
+        } catch (Throwable e) {
+          LOG.error("Failed to shutdown transaction manager.", e);
+          // because shutdown hooks execute concurrently, the logger may be closed already: thus also print it.
+          System.err.println("Failed to shutdown transaction manager: " + e.getMessage()
+                               + ". At " + StackTraceUtil.toStringStackTrace(e));
+        }
       }
     });
   }
@@ -104,7 +113,7 @@ public class SingleNodeMain {
   protected void startUp(String[] args) throws Exception {
     logAppenderInitializer.initialize();
 
-    File zkDir = new File(ZOOKEEPER_DATA_DIR);
+    File zkDir = new File(configuration.get(Constants.CFG_LOCAL_DATA_DIR) + "/zookeeper");
     zkDir.mkdir();
     zookeeper = InMemoryZKServer.builder().setDataDir(zkDir).build();
     zookeeper.startAndWait();
@@ -112,6 +121,7 @@ public class SingleNodeMain {
     configuration.set(Constants.CFG_ZOOKEEPER_ENSEMBLE, zookeeper.getConnectionStr());
 
     // Start all the services.
+    transactionManager.init();
     metricsCollectionService.startAndWait();
     metricsQueryService.startAndWait();
 
@@ -144,6 +154,7 @@ public class SingleNodeMain {
       appFabricServer.stopAndWait();
       overloadFrontend.stop(true);
       overlordCollection.stop(true);
+      transactionManager.close();
       zookeeper.stopAndWait();
     } catch (Exception e) {
       LOG.error(e.getMessage(), e);
@@ -271,7 +282,7 @@ public class SingleNodeMain {
       new AppFabricServiceRuntimeModule().getInMemoryModules(),
       new ProgramRunnerRuntimeModule().getInMemoryModules(),
       new MetricsModules().getInMemoryModules(),
-      new GatewayModules().getInMemoryModules(),
+      new GatewayModules(configuration).getInMemoryModules(),
       new DataFabricModules().getInMemoryModules(),
       new MetadataModules().getInMemoryModules(),
       new MetricsClientRuntimeModule().getInMemoryModules(),
@@ -283,26 +294,14 @@ public class SingleNodeMain {
   private static List<Module> createPersistentModules(CConfiguration configuration, Configuration hConf) {
     configuration.setIfUnset(Constants.CFG_DATA_LEVELDB_DIR, Constants.DEFAULT_DATA_LEVELDB_DIR);
 
-    boolean inVPC = false;
     String environment =
       configuration.get(Constants.CFG_APPFABRIC_ENVIRONMENT, Constants.DEFAULT_APPFABRIC_ENVIRONMENT);
     if (environment.equals("vpc")) {
       System.err.println("Reactor Environment : " + environment);
-      inVPC = true;
     }
 
-    boolean levelDBCompatibleOS = DataFabricLevelDBModule.isOsLevelDBCompatible();
-    boolean levelDBEnabled =
-      configuration.getBoolean(Constants.CFG_DATA_LEVELDB_ENABLED, Constants.DEFAULT_DATA_LEVELDB_ENABLED);
-
-    boolean useLevelDB = (inVPC || levelDBCompatibleOS) && levelDBEnabled;
-    if (useLevelDB) {
-      configuration.set(Constants.CFG_DATA_INMEMORY_PERSISTENCE, Constants.InMemoryPersistenceType.LEVELDB.name());
-    } else {
-      configuration.set(Constants.CFG_DATA_INMEMORY_PERSISTENCE, Constants.InMemoryPersistenceType.HSQLDB.name());
-    }
-
-    configuration.setBoolean(Constants.CFG_DATA_LEVELDB_ENABLED, levelDBEnabled);
+    configuration.set(Constants.CFG_DATA_INMEMORY_PERSISTENCE, Constants.InMemoryPersistenceType.LEVELDB.name());
+    configuration.setBoolean(Constants.CFG_DATA_LEVELDB_ENABLED, true);
 
     return ImmutableList.of(
       new ConfigModule(configuration, hConf),
@@ -312,8 +311,8 @@ public class SingleNodeMain {
       new AppFabricServiceRuntimeModule().getSingleNodeModules(),
       new ProgramRunnerRuntimeModule().getSingleNodeModules(),
       new MetricsModules().getSingleNodeModules(),
-      new GatewayModules().getSingleNodeModules(),
-      useLevelDB ? new DataFabricLevelDBModule(configuration) : new DataFabricModules().getSingleNodeModules(),
+      new GatewayModules(configuration).getSingleNodeModules(),
+      new DataFabricModules().getSingleNodeModules(configuration),
       new MetadataModules().getSingleNodeModules(),
       new MetricsClientRuntimeModule().getSingleNodeModules(),
       new MetricsQueryRuntimeModule().getSingleNodeModules(),

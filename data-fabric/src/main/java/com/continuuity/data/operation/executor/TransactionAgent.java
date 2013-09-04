@@ -11,6 +11,7 @@ import com.continuuity.data.operation.ReadColumnRange;
 import com.continuuity.data.operation.Scan;
 import com.continuuity.data.operation.WriteOperation;
 import com.continuuity.data.table.Scanner;
+import com.continuuity.data2.transaction.Transaction;
 
 import java.util.List;
 import java.util.Map;
@@ -37,6 +38,13 @@ public interface TransactionAgent {
    * @throws OperationException if something goes wrong in data fabric
    */
   public void start() throws OperationException;
+
+  /**
+   * Start the interaction with this agent.
+   * @param timeout the timeout for the transaction, or null for no timeout
+   * @throws OperationException if something goes wrong in data fabric
+   */
+  public void start(Integer timeout) throws OperationException;
 
   /**
    * Ends the interaction with this agent, indicating failure. This can mean, for
@@ -136,4 +144,10 @@ public interface TransactionAgent {
    * @return the number of operations
    */
   public int getFailedCount();
+
+  /**
+   * NOTE: TransactionAgent will go away once we fully migrate to new tx system.
+   * @return current value of {@link com.continuuity.data2.transaction.Transaction} or null
+   */
+  public Transaction getCurrentTx();
 }
