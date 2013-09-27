@@ -12,8 +12,6 @@ import com.continuuity.common.guice.DiscoveryRuntimeModule;
 import com.continuuity.common.guice.IOModule;
 import com.continuuity.common.guice.LocationRuntimeModule;
 import com.continuuity.common.metrics.MetricsCollectionService;
-import com.continuuity.common.service.ServerException;
-import com.continuuity.common.utils.Copyright;
 import com.continuuity.common.utils.StackTraceUtil;
 import com.continuuity.data.runtime.DataFabricModules;
 import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
@@ -26,7 +24,6 @@ import com.continuuity.metadata.MetadataServerInterface;
 import com.continuuity.metrics.guice.MetricsClientRuntimeModule;
 import com.continuuity.metrics.guice.MetricsQueryRuntimeModule;
 import com.continuuity.metrics.query.MetricsQueryService;
-import com.continuuity.metrics2.collector.MetricsCollectionServerInterface;
 import com.continuuity.metrics2.frontend.MetricsFrontendServerInterface;
 import com.continuuity.runtime.MetadataModules;
 import com.continuuity.runtime.MetricsModules;
@@ -41,11 +38,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
-import java.io.IOException;
 import java.io.PrintStream;
 import java.net.InetAddress;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Singlenode Main.
@@ -57,7 +52,6 @@ public class SingleNodeMain {
   private final WebCloudAppService webCloudAppService;
   private final CConfiguration configuration;
   private final Gateway gateway;
-  private final MetricsCollectionServerInterface overlordCollection;
   private final MetricsFrontendServerInterface overloadFrontend;
   private final MetadataServerInterface metaDataServer;
   private final AppFabricServer appFabricServer;
@@ -70,14 +64,13 @@ public class SingleNodeMain {
 
   private InMemoryZKServer zookeeper;
 
-  public SingleNodeMain(List<Module> modules, CConfiguration configuration) {
+  public SingleNodeMain(List<Module> modules, CConfiguration configuration, String webAppPath) {
     this.configuration = configuration;
-    this.webCloudAppService = new WebCloudAppService();
+    this.webCloudAppService = new WebCloudAppService(webAppPath);
 
     Injector injector = Guice.createInjector(modules);
     transactionManager = injector.getInstance(InMemoryTransactionManager.class);
     gateway = injector.getInstance(Gateway.class);
-    overlordCollection = injector.getInstance(MetricsCollectionServerInterface.class);
     overloadFrontend = injector.getInstance(MetricsFrontendServerInterface.class);
     metaDataServer = injector.getInstance(MetadataServerInterface.class);
     appFabricServer = injector.getInstance(AppFabricServer.class);
@@ -89,12 +82,7 @@ public class SingleNodeMain {
     Runtime.getRuntime().addShutdownHook(new Thread() {
       @Override
       public void run() {
-        try {
-          webCloudAppService.stop(true);
-        } catch (ServerException e) {
-          LOG.error(StackTraceUtil.toStringStackTrace(e));
-          System.err.println("Failed to shutdown node web cloud app");
-        }
+        webCloudAppService.stopAndWait();
         try {
           transactionManager.close();
         } catch (Throwable e) {
@@ -118,14 +106,12 @@ public class SingleNodeMain {
     zookeeper = InMemoryZKServer.builder().setDataDir(zkDir).build();
     zookeeper.startAndWait();
 
-    configuration.set(Constants.CFG_ZOOKEEPER_ENSEMBLE, zookeeper.getConnectionStr());
+    configuration.set(Constants.Zookeeper.QUORUM, zookeeper.getConnectionStr());
 
     // Start all the services.
     transactionManager.init();
     metricsCollectionService.startAndWait();
     metricsQueryService.startAndWait();
-
-    overlordCollection.start(args, configuration);
 
     Service.State state = appFabricServer.startAndWait();
     if (state != Service.State.RUNNING) {
@@ -135,7 +121,7 @@ public class SingleNodeMain {
     metaDataServer.start(args, configuration);
     overloadFrontend.start(args, configuration);
     gateway.start(args, configuration);
-    webCloudAppService.start(args, configuration);
+    webCloudAppService.startAndWait();
 
     String hostname = InetAddress.getLocalHost().getHostName();
     System.out.println("Continuuity Reactor (tm) started successfully");
@@ -147,13 +133,12 @@ public class SingleNodeMain {
    */
   public void shutDown() {
     try {
-      webCloudAppService.stop(true);
+      webCloudAppService.stopAndWait();
       gateway.stop(true);
       metaDataServer.stop(true);
       metaDataServer.stop(true);
       appFabricServer.stopAndWait();
       overloadFrontend.stop(true);
-      overlordCollection.stop(true);
       transactionManager.close();
       zookeeper.stopAndWait();
     } catch (Exception e) {
@@ -182,8 +167,9 @@ public class SingleNodeMain {
     out.println("  ./continuuity-reactor [options]");
     out.println("");
     out.println("Additional options:");
-    out.println("  --help      To print this message");
-    out.println("  --in-memory To run everything in memory");
+    out.println("  --web-app-path  Path to web-app");
+    out.println("  --help          To print this message");
+    out.println("  --in-memory     To run everything in memory");
     out.println("");
 
     if (error) {
@@ -192,48 +178,16 @@ public class SingleNodeMain {
   }
 
   /**
-   * Checks if node is in path or no.
-   */
-  public static boolean nodeExists() {
-    try {
-      Process proc = Runtime.getRuntime().exec("node -v");
-      TimeUnit.SECONDS.sleep(2);
-      int exitValue = proc.exitValue();
-      if (exitValue != 0) {
-        return false;
-      }
-    } catch (IOException e) {
-      LOG.error(StackTraceUtil.toStringStackTrace(e));
-      throw new RuntimeException("Nodejs not in path. Please add it to PATH in the shell you are starting devsuite");
-    } catch (InterruptedException e) {
-      LOG.error(StackTraceUtil.toStringStackTrace(e));
-      Thread.currentThread().interrupt();
-    }
-    return true;
-  }
-
-  /**
    * The root of all goodness!
    *
    * @param args Our cmdline arguments
    */
   public static void main(String[] args) {
-    Copyright.print(System.out);
-
-    // Checks if node exists.
-    try {
-      if (!nodeExists()) {
-        System.err.println("Unable to find nodejs in path. Please add it to PATH.");
-      }
-    } catch (Exception e) {
-      System.err.println(e.getMessage());
-      System.exit(-1);
-    }
-
     CConfiguration configuration = CConfiguration.create();
 
     // Single node use persistent data fabric by default
     boolean inMemory = false;
+    String webAppPath = WebCloudAppService.WEB_APP;
 
     if (args.length > 0) {
       if ("--help".equals(args[0]) || "-h".equals(args[0])) {
@@ -244,6 +198,8 @@ public class SingleNodeMain {
       } else if ("--leveldb-disable".equals(args[0])) {
         // this option overrides a setting that tells if level db can be used for persistence
         configuration.setBoolean(Constants.CFG_DATA_LEVELDB_ENABLED, false);
+      } else if ("--web-app-path".equals(args[0])) {
+        webAppPath = args[1];
       } else {
         usage(true);
       }
@@ -259,7 +215,7 @@ public class SingleNodeMain {
     List<Module> modules = inMemory ? createInMemoryModules(configuration, hConf)
                                     : createPersistentModules(configuration, hConf);
 
-    SingleNodeMain main = new SingleNodeMain(modules, configuration);
+    SingleNodeMain main = new SingleNodeMain(modules, configuration, webAppPath);
     try {
       main.startUp(args);
     } catch (Exception e) {

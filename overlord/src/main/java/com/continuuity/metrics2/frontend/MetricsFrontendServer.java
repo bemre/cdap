@@ -93,7 +93,7 @@ public class MetricsFrontendServer extends AbstractRegisteredServer
     try {
       // Get the port the server should run on.
       InetAddress serverAddress = getServerInetAddress(conf.get(
-        Constants.CFG_METRICS_FRONTEND_SERVER_ADDRESS
+        Constants.CFG_METRICS_FRONTEND_SERVER_ADDRESS, "localhost"
       ));
 
       // Get the port that the server should be started on from configuration.
@@ -139,7 +139,7 @@ public class MetricsFrontendServer extends AbstractRegisteredServer
       server = new THsHaServer(serverArgs);
 
       // Set the server name.
-      setServerName(Constants.SERVICE_METRICS_FRONTEND_SERVER);
+      setServerName(Constants.Service.METRICS_FRONTEND);
 
       // Provide the registration info of service.
       RegisteredServerInfo info

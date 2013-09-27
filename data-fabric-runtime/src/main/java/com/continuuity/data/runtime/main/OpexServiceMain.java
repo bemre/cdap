@@ -63,7 +63,7 @@ public class OpexServiceMain {
       return;
     }
 
-    int command = NOOP;
+    int command;
 
     if ("start".equals(args[0])) {
       command = START;
@@ -81,7 +81,7 @@ public class OpexServiceMain {
       ZKClientServices.delegate(
         ZKClients.reWatchOnExpire(
           ZKClients.retryOnFailure(
-            ZKClientService.Builder.of(configuration.get(Constants.CFG_ZOOKEEPER_ENSEMBLE))
+            ZKClientService.Builder.of(configuration.get(Constants.Zookeeper.QUORUM))
                                    .setSessionTimeout(10000)
                                    .build(),
             RetryStrategies.fixDelay(2, TimeUnit.SECONDS)
@@ -146,9 +146,8 @@ public class OpexServiceMain {
         opexService.start(new String[] { }, configuration);
       } catch (Exception e) {
         System.err.println("Failed to start service: " + e.getMessage());
-        return;
       }
-    } else if (STOP == command) {
+    } else {
       Copyright.print(System.out);
       System.out.println("Stopping Operation Executor Service...");
       opexService.stop(true);
