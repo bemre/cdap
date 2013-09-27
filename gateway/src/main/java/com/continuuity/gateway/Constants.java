@@ -4,16 +4,16 @@ package com.continuuity.gateway;
  * Constants is a utility class that contains a set of universal constants
  * that are used throughout the Gateway project.
  */
-public class Constants {
+public final class Constants {
   /**
    * The prefix for all continuity classes.
    */
-  static final String CONTINUUITY_PREFIX = "X-Continuuity-";
+  public static final String CONTINUUITY_PREFIX = "X-Continuuity-";
 
   /**
    * The prefix for all gateway properties.
    */
-  static final String GATEWAY_PREFIX = "gateway.";
+  public static final String GATEWAY_PREFIX = "gateway.";
 
   /**
    * Used by the external client to identify and authenticate the client.
@@ -44,7 +44,7 @@ public class Constants {
    * Hostname of the gateway service.
    */
   public static final String CONFIG_HOSTNAME
-    = GATEWAY_PREFIX + "hostname";
+    = GATEWAY_PREFIX + "bind.address";
 
   /**
    * Whether gateway should provide ZK service discovery to the connectors.
@@ -132,18 +132,10 @@ public class Constants {
     return collectorName + "." + propertyName;
   }
 
-  public static boolean isContinuuityHeader(String header) {
-    return header.startsWith(CONTINUUITY_PREFIX);
-  }
-
-  // Defaults for various configurations
 
   /**
    * Default number of worker threads for a connector.
    */
   public static final int DEFAULT_THREADS = 20;
 
-  public static final String METRICS_SERVICE_NAME =
-        com.continuuity.common.conf.Constants.SERVICE_METRICS_FRONTEND_SERVER;
-  public static final String FLOW_SERVICE_NAME = "app.fabric.service";
 } // end of Constants class

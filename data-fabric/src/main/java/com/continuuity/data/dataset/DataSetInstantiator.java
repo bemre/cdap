@@ -2,7 +2,6 @@ package com.continuuity.data.dataset;
 
 import com.continuuity.api.data.DataSet;
 import com.continuuity.data.DataFabric;
-import com.continuuity.data.operation.executor.TransactionProxy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -26,22 +25,17 @@ public class DataSetInstantiator extends DataSetInstantiationBase implements Dat
 
   // the data fabric (an operation executor and an operation context
   private DataFabric fabric;
-  // the transaction proxy
-  private TransactionProxy transactionProxy;
 
   /**
-   * Constructor from data fabric and transaction proxy.
+   * Constructor from data fabric.
    * @param fabric the data fabric
-   * @param transactionProxy the transaction proxy to use for all data sets
    * @param classLoader the class loader to use for loading data set classes.
    *                    If null, then the default class loader is used
    */
   public DataSetInstantiator(DataFabric fabric,
-                             TransactionProxy transactionProxy,
                              ClassLoader classLoader) {
     super(classLoader);
     this.fabric = fabric;
-    this.transactionProxy = transactionProxy;
   }
 
   /**
@@ -53,6 +47,6 @@ public class DataSetInstantiator extends DataSetInstantiationBase implements Dat
   public
   <T extends DataSet> T getDataSet(String dataSetName)
     throws DataSetInstantiationException {
-    return super.getDataSet(dataSetName, this.fabric, this.transactionProxy);
+    return super.getDataSet(dataSetName, this.fabric);
   }
 }

@@ -40,7 +40,7 @@ public class IndexedObjectStore<T> extends ObjectStore<T> {
 
   private static final byte[] EMPTY_VALUE = new byte[0];
   //KEY_PREFIX is used to prefix primary key when it stores PrimaryKey -> Categories mapping.
-  private static final byte[] KEY_PREFIX = Bytes.toBytes("_keyToSecondaryKey");
+  private static final byte[] KEY_PREFIX = Bytes.toBytes("_fk");
 
   /**
    * Construct IndexObjectStore with name and type.
@@ -65,8 +65,9 @@ public class IndexedObjectStore<T> extends ObjectStore<T> {
   }
 
   private void init(String name) {
-    this.indexName = "i_" + name;
+    this.indexName = "indexed." + name;
   }
+
   @Override
   public DataSetSpecification configure() {
     return new DataSetSpecification.Builder(super.configure()).
@@ -143,6 +144,11 @@ public class IndexedObjectStore<T> extends ObjectStore<T> {
     writeToObjectStore(key, object);
 
     //Update the secondaryKeys
+    //logic:
+    //  - Get existing secondary keys
+    //  - Compute diff between existing secondary keys and new secondary keys
+    //  - Remove the secondaryKeys that are removed
+    //  - Add the new keys that are added
     OperationResult<Map<byte[], byte[]>> result = index.read(new Read(getPrefixedPrimaryKey(key)));
     Set<byte[]> existingSecondaryKeys = Sets.newTreeSet(new Bytes.ByteArrayComparator());
 
@@ -159,9 +165,11 @@ public class IndexedObjectStore<T> extends ObjectStore<T> {
     List<byte[]> secondaryKeysAdded =  secondaryKeysToAdd(existingSecondaryKeys, newSecondaryKeys);
 
     //for each key store the secondaryKey. This will be used while deleting old index values.
-    index.write(new Write(getPrefixedPrimaryKey(key),
+    if (secondaryKeysAdded.size() > 0) {
+       index.write(new Write(getPrefixedPrimaryKey(key),
                           secondaryKeysAdded.toArray(new byte[secondaryKeysAdded.size()][]),
                           new byte[secondaryKeysAdded.size()][0]));
+    }
 
     for (byte[] secondaryKey : secondaryKeysAdded) {
       //update the index.

@@ -5,11 +5,14 @@ package com.continuuity.metrics.data;
 
 import com.continuuity.api.common.Bytes;
 import com.continuuity.api.data.OperationResult;
-import com.continuuity.data.table.VersionedColumnarTable;
+import com.continuuity.data2.dataset.lib.table.MetricsTable;
+import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ExecutionException;
 
@@ -30,11 +33,14 @@ import java.util.concurrent.ExecutionException;
  */
 public final class EntityTable {
 
+  private static final Logger LOG = LoggerFactory.getLogger(EntityTable.class);
+
   private static final byte[] ID = Bytes.toBytes("id");
   private static final byte[] MAX_ID = Bytes.toBytes("maxId");
   private static final byte[] NAME = Bytes.toBytes("name");
+  private static final byte[] DOT = { '.' };
 
-  private final VersionedColumnarTable table;
+  private final MetricsTable table;
   private final LoadingCache<EntityName, Long> entityCache;
   private final LoadingCache<EntityId, EntityName> idCache;
   private final long maxId;
@@ -44,19 +50,19 @@ public final class EntityTable {
   /**
    * Creates an EntityTable with max id = 65535.
    *
-   * See {@link #EntityTable(com.continuuity.data.table.VersionedColumnarTable, long)}.
+   * See {@link #EntityTable(MetricsTable, long)}.
    */
-  public EntityTable(VersionedColumnarTable table) {
+  public EntityTable(MetricsTable table) {
     this(table, 0x10000);
   }
 
   /**
-   * Creates an EntityTable backed by the given {@link VersionedColumnarTable}.
+   * Creates an EntityTable backed by the given {@link MetricsTable}.
    *
    * @param table The storage table
    * @param maxId Maximum ID (exclusive) that can be generated.
    */
-  public EntityTable(VersionedColumnarTable table, long maxId) {
+  public EntityTable(MetricsTable table, long maxId) {
     Preconditions.checkArgument(table != null, "Table cannot be null.");
     Preconditions.checkArgument(maxId > 0, "maxId must be > 0.");
 
@@ -104,7 +110,7 @@ public final class EntityTable {
       public Long load(EntityName key) throws Exception {
         byte[] rowKey = Bytes.toBytes(key.getType() + '.' + key.getName());
 
-        OperationResult <byte[]> result = table.getDirty(rowKey, ID);
+        OperationResult <byte[]> result = table.get(rowKey, ID);
 
         // Found, return it
         if (!result.isEmpty()) {
@@ -113,18 +119,23 @@ public final class EntityTable {
 
         // Not found, generate a new ID
         byte[] maxIdRowKey = Bytes.toBytes(key.getType() + ".maxId");
-        long newId = table.incrementAtomicDirtily(maxIdRowKey, MAX_ID, 1L);
+        long newId = table.incrementAndGet(maxIdRowKey, MAX_ID, 1L);
         Preconditions.checkState(newId < maxId, "Maximum %s ID generated.", maxId);
 
+        if (key.getName() == null || key.getName().isEmpty()) {
+          LOG.warn("Adding mapping for " + (key.getName() == null ? "null" : "empty") + " name, " +
+                     " with type " + key.getType() + ", new id is " + newId);
+        }
+
         // Save the mapping
-        if (table.compareAndSwapDirty(rowKey, ID, null, Bytes.toBytes(newId))) {
+        if (table.swap(rowKey, ID, null, Bytes.toBytes(newId))) {
           // Save the reverse mapping from r.type.id => name as well
-          rowKey = com.google.common.primitives.Bytes.concat(Bytes.toBytes(key.getType() + '.'), Bytes.toBytes(newId));
+          rowKey = Bytes.concat(Bytes.toBytes(key.getType()), DOT, Bytes.toBytes(newId));
 
           // It is wrong to have forward mapping set when reverse mapping failed to set, always try to overwrite it.
           byte[] oldName = null;
-          while (!table.compareAndSwapDirty(rowKey, NAME, oldName, Bytes.toBytes(key.getName()))) {
-            result = table.getDirty(rowKey, NAME);
+          while (!table.swap(rowKey, NAME, oldName, Bytes.toBytes(key.getName()))) {
+            result = table.get(rowKey, NAME);
             if (result.isEmpty()) {
               throw new IllegalStateException("Fail to set reverse mapping from id to name.");
             }
@@ -135,7 +146,7 @@ public final class EntityTable {
         }
 
         // Get the value if CAS failed.
-        result = table.getDirty(rowKey, ID);
+        result = table.get(rowKey, ID);
 
         if (result.isEmpty()) {
           throw new IllegalStateException("ID not found for " + key);
@@ -150,9 +161,8 @@ public final class EntityTable {
       @Override
       public EntityName load(EntityId key) throws Exception {
         // Lookup the reverse mapping
-        byte[] rowKey = com.google.common.primitives.Bytes.concat(Bytes.toBytes(key.getType() + '.'),
-                                                                  Bytes.toBytes(key.getId()));
-        OperationResult<byte[]> result = table.getDirty(rowKey, NAME);
+        byte[] rowKey = Bytes.concat(Bytes.toBytes(key.getType()), DOT, Bytes.toBytes(key.getId()));
+        OperationResult<byte[]> result = table.get(rowKey, NAME);
         if (result.isEmpty()) {
           throw new IllegalArgumentException("Entity name not found for type " + key.getType() + ", id " + key.getId());
         }
@@ -214,6 +224,14 @@ public final class EntityTable {
       int result = type.hashCode();
       result = 31 * result + name.hashCode();
       return result;
+    }
+
+    @Override
+    public String toString() {
+      return Objects.toStringHelper(this)
+                    .add("type", type)
+                    .add("name", name)
+                    .toString();
     }
   }
 

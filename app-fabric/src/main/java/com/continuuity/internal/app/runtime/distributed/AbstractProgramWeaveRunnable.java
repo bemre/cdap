@@ -4,6 +4,7 @@
 package com.continuuity.internal.app.runtime.distributed;
 
 import com.continuuity.app.program.Program;
+import com.continuuity.app.program.Programs;
 import com.continuuity.app.queue.QueueReader;
 import com.continuuity.app.runtime.Arguments;
 import com.continuuity.app.runtime.ProgramController;
@@ -14,21 +15,22 @@ import com.continuuity.common.conf.Constants;
 import com.continuuity.common.conf.KafkaConstants;
 import com.continuuity.common.guice.ConfigModule;
 import com.continuuity.common.guice.IOModule;
+import com.continuuity.common.guice.LocationRuntimeModule;
 import com.continuuity.common.metrics.MetricsCollectionService;
-import com.continuuity.data.operation.executor.OperationExecutor;
-import com.continuuity.data.operation.executor.remote.RemoteOperationExecutor;
+import com.continuuity.data.runtime.DataFabricModules;
 import com.continuuity.internal.app.queue.QueueReaderFactory;
-import com.continuuity.internal.app.queue.SingleQueueReader;
+import com.continuuity.internal.app.queue.SingleQueue2Reader;
 import com.continuuity.internal.app.runtime.AbstractListener;
 import com.continuuity.internal.app.runtime.BasicArguments;
 import com.continuuity.internal.app.runtime.DataFabricFacade;
 import com.continuuity.internal.app.runtime.DataFabricFacadeFactory;
+import com.continuuity.internal.app.runtime.ProgramOptionConstants;
 import com.continuuity.internal.app.runtime.SimpleProgramOptions;
 import com.continuuity.internal.app.runtime.SmartDataFabricFacade;
 import com.continuuity.internal.kafka.client.ZKKafkaClientService;
 import com.continuuity.kafka.client.KafkaClientService;
 import com.continuuity.logging.appender.LogAppenderInitializer;
-import com.continuuity.logging.runtime.LoggingModules;
+import com.continuuity.logging.guice.LoggingModules;
 import com.continuuity.metrics.guice.MetricsClientRuntimeModule;
 import com.continuuity.weave.api.Command;
 import com.continuuity.weave.api.ServiceAnnouncer;
@@ -37,7 +39,6 @@ import com.continuuity.weave.api.WeaveRunnable;
 import com.continuuity.weave.api.WeaveRunnableSpecification;
 import com.continuuity.weave.common.Cancellable;
 import com.continuuity.weave.common.Services;
-import com.continuuity.weave.filesystem.HDFSLocationFactory;
 import com.continuuity.weave.filesystem.LocalLocationFactory;
 import com.continuuity.weave.filesystem.LocationFactory;
 import com.continuuity.weave.zookeeper.RetryStrategies;
@@ -57,7 +58,6 @@ import com.google.inject.Injector;
 import com.google.inject.Module;
 import com.google.inject.PrivateModule;
 import com.google.inject.Scopes;
-import com.google.inject.Singleton;
 import com.google.inject.assistedinject.FactoryModuleBuilder;
 import com.google.inject.name.Named;
 import com.google.inject.name.Names;
@@ -141,7 +141,7 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
         ZKClientServices.delegate(
           ZKClients.reWatchOnExpire(
             ZKClients.retryOnFailure(
-              ZKClientService.Builder.of(cConf.get(Constants.CFG_ZOOKEEPER_ENSEMBLE))
+              ZKClientService.Builder.of(cConf.get(Constants.Zookeeper.QUORUM))
                 .setSessionTimeout(10000)
                 .build(),
               RetryStrategies.fixDelay(2, TimeUnit.SECONDS)
@@ -172,12 +172,12 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
       //
       Arguments runtimeArguments
         = new Gson().fromJson(cmdLine.getOptionValue(RunnableOptions.RUNTIME_ARGS), BasicArguments.class);
-      programOpts =  new SimpleProgramOptions(name,
-                                              new BasicArguments(ImmutableMap.of(
-                                                "instanceId", Integer.toString(context.getInstanceId()),
-                                                "instances", Integer.toString(context.getInstanceCount()),
-                                                "runId", context.getApplicationRunId().getId())),
-                                              runtimeArguments);
+      programOpts =  new SimpleProgramOptions(
+        name, new BasicArguments(ImmutableMap.of(
+                  ProgramOptionConstants.INSTANCE_ID, Integer.toString(context.getInstanceId()),
+                  ProgramOptionConstants.INSTANCES, Integer.toString(context.getInstanceCount()),
+                  ProgramOptionConstants.RUN_ID, context.getApplicationRunId().getId())),
+        runtimeArguments);
 
       LOG.info("Runnable initialized: " + name);
     } catch (Throwable t) {
@@ -196,9 +196,9 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
       controller.resume().get();
       return;
     }
-    if ("instances".equals(command.getCommand())) {
+    if (ProgramOptionConstants.INSTANCES.equals(command.getCommand())) {
       int instances = Integer.parseInt(command.getOptions().get("count"));
-      controller.command("instances", instances).get();
+      controller.command(ProgramOptionConstants.INSTANCES, instances).get();
       return;
     }
     LOG.warn("Ignore unsupported command: " + command);
@@ -207,15 +207,11 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
   @Override
   public void stop() {
     try {
-      LOG.info("Stopping runnable: " + name);
+      LOG.info("Stopping runnable: {}", name);
       controller.stop().get();
-      LOG.info("Runnable stopped: " + name);
     } catch (Exception e) {
-      LOG.error("Fail to stop. {}", e, e);
+      LOG.error("Fail to stop: {}", e, e);
       throw Throwables.propagate(e);
-    } finally {
-      LOG.info("Stopping metrics service");
-      Futures.getUnchecked(Services.chainStop(metricsCollectionService, kafkaClientService, zkClientService));
     }
   }
 
@@ -224,7 +220,7 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
     LOG.info("Starting metrics service");
     Futures.getUnchecked(Services.chainStart(zkClientService, kafkaClientService, metricsCollectionService));
 
-    LOG.info("Starting runnable: " + name);
+    LOG.info("Starting runnable: {}", name);
     controller = injector.getInstance(getProgramClass()).run(program, programOpts);
     final SettableFuture<ProgramController.State> state = SettableFuture.create();
     controller.addListener(new AbstractListener() {
@@ -240,7 +236,14 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
       }
     }, MoreExecutors.sameThreadExecutor());
 
-    LOG.info("Program runner terminated. State: {}", Futures.getUnchecked(state));
+    LOG.info("Program stopped. State: {}", Futures.getUnchecked(state));
+  }
+
+  @Override
+  public void destroy() {
+    LOG.info("Releasing resources: {}", name);
+    Futures.getUnchecked(Services.chainStop(metricsCollectionService, kafkaClientService, zkClientService));
+    LOG.info("Runnable stopped: {}", name);
   }
 
   private CommandLine parseArgs(String[] args) {
@@ -266,29 +269,26 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
     return Modules.combine(new ConfigModule(cConf, hConf),
                            new IOModule(),
                            new MetricsClientRuntimeModule(kafkaClientService).getDistributedModules(),
+                           new LocationRuntimeModule().getDistributedModules(),
                            new LoggingModules().getDistributedModules(),
+                           new DataFabricModules(cConf, hConf).getDistributedModules(),
                            new AbstractModule() {
       @Override
       protected void configure() {
-        bind(InetAddress.class).annotatedWith(Names.named(Constants.CFG_APP_FABRIC_SERVER_ADDRESS))
+        bind(InetAddress.class).annotatedWith(Names.named(Constants.AppFabric.SERVER_ADDRESS))
                                .toInstance(context.getHost());
-
-        bind(LocationFactory.class).toInstance(new HDFSLocationFactory(hConf));
-
         // For program loading
         install(createProgramFactoryModule());
+
+        // For Binding queue reader stuff (for flowlets)
+        install(createFactoryModule(QueueReaderFactory.class,
+                                    QueueReader.class,
+                                    SingleQueue2Reader.class));
 
         // For binding DataSet transaction stuff
         install(createFactoryModule(DataFabricFacadeFactory.class,
                                     DataFabricFacade.class,
                                     SmartDataFabricFacade.class));
-
-        // For Binding queue stuff
-        install(createFactoryModule(QueueReaderFactory.class, QueueReader.class, SingleQueueReader.class));
-
-        // Bind remote operation executor
-        bind(OperationExecutor.class).to(RemoteOperationExecutor.class).in(Singleton.class);
-        bind(CConfiguration.class).annotatedWith(Names.named("RemoteOperationExecutorConfig")).toInstance(cConf);
 
         bind(ServiceAnnouncer.class).toInstance(new ServiceAnnouncer() {
           @Override
@@ -296,6 +296,7 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
             return context.announce(serviceName, port);
           }
         });
+
       }
     });
   }
@@ -303,15 +304,11 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
   private <T> Module createFactoryModule(final Class<?> factoryClass,
                                          final Class<T> sourceClass,
                                          final Class<? extends T> targetClass) {
-    return new AbstractModule() {
-      @Override
-      protected void configure() {
-        install(new FactoryModuleBuilder()
-                  .implement(sourceClass, targetClass)
-                  .build(factoryClass));
-      }
-    };
+    return new FactoryModuleBuilder()
+      .implement(sourceClass, targetClass)
+      .build(factoryClass);
   }
+
 
   private Module createProgramFactoryModule() {
     return new PrivateModule() {
@@ -340,7 +337,7 @@ public abstract class AbstractProgramWeaveRunnable<T extends ProgramRunner> impl
     }
 
     public Program create(String path) throws IOException {
-      return new Program(locationFactory.create(path));
+      return Programs.create(locationFactory.create(path));
     }
   }
 }

@@ -3,10 +3,8 @@ package com.continuuity.metadata;
 import com.continuuity.api.data.OperationException;
 import com.continuuity.data.metadata.MetaDataEntry;
 import com.continuuity.data.metadata.MetaDataStore;
-import com.continuuity.data.metadata.SerializingMetaDataStore;
 import com.continuuity.data.operation.OperationContext;
 import com.continuuity.data.operation.StatusCode;
-import com.continuuity.data.operation.executor.OperationExecutor;
 import com.continuuity.metadata.thrift.Account;
 import com.continuuity.metadata.thrift.Application;
 import com.continuuity.metadata.thrift.Dataset;
@@ -15,6 +13,7 @@ import com.continuuity.metadata.thrift.Mapreduce;
 import com.continuuity.metadata.thrift.MetadataServiceException;
 import com.continuuity.metadata.thrift.Query;
 import com.continuuity.metadata.thrift.Stream;
+import com.continuuity.metadata.thrift.Workflow;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.inject.Inject;
@@ -39,11 +38,11 @@ public class MetadataService extends MetadataHelper
 
   /**
    * Construction of metadata service handler.
-   * @param opex instance of opex.
+   * @param mds an instance of a meta data store
    */
   @Inject
-  public MetadataService(OperationExecutor opex) {
-    this.mds = new SerializingMetaDataStore(opex);
+  public MetadataService(MetaDataStore mds) {
+    this.mds = mds;
   }
 
   //-------------------- generic methods ---------------------------------
@@ -398,15 +397,20 @@ public class MetadataService extends MetadataHelper
       }
 
       String oldValue = entry.getTextField(field);
-      for (String x : oldValue.split(" ")) {
-        if (x.equals(item)) {
-          LOG.debug(String.format("No need to add '%s' to field %s of %s " +
-              "'%s': Already in current value '%s'.", item, field, what, id,
-              oldValue));
-          return true; // item is already in list
+      String newValue;
+      if (oldValue == null) {
+        newValue = item + " ";
+      } else {
+        for (String x : oldValue.split(" ")) {
+          if (x.equals(item)) {
+            LOG.debug(String.format("No need to add '%s' to field %s of %s " +
+                "'%s': Already in current value '%s'.", item, field, what, id,
+                oldValue));
+            return true; // item is already in list
+          }
         }
+        newValue = oldValue + item + " ";
       }
-      String newValue = oldValue == null ? item + " " : oldValue + item + " ";
 
       try {
         mds.swapField(opContext, account, app, type, id, field,
@@ -927,6 +931,11 @@ public class MetadataService extends MetadataHelper
     }
     LOG.info("Flow meta data for account '" + accountId + "' deleted.");
 
+    for (Workflow workflow : getWorkflows(accountId)) {
+      deleteWorkflow(accountId, workflow.getApplication(), workflow.getId());
+    }
+    LOG.info("Workflow meta data for account '" + accountId + "' deleted.");
+
     // list all applications for the account and delete them
     for (Application application : getApplications(account)) {
       deleteApplication(account, application);
@@ -935,4 +944,41 @@ public class MetadataService extends MetadataHelper
     LOG.info("All meta data for account '" + accountId + "' deleted.");
   }
 
+  //---------------------------Workflow apis -----------------------------------
+  @Override
+  public boolean createWorkflow(String accountId, Workflow workflow) throws
+    MetadataServiceException, TException {
+    return create(workflowHelper, new Account(accountId), workflow);
+  }
+
+  @Override
+  public List<Workflow> getWorkflows(String account) throws MetadataServiceException, TException {
+    return list(workflowHelper, new Account(account), null);
+  }
+
+  @Override
+  public Workflow getWorkflow(String account, String application, String workflowId)
+                              throws MetadataServiceException, TException {
+    return get(workflowHelper, new Account(account),
+                               new Workflow(workflowId, application));
+  }
+
+  @Override
+  public List<Workflow> getWorkflowsByApplication(String account, String application)
+                                                  throws MetadataServiceException, TException {
+    return list(workflowHelper, new Account(account),
+                                new Application(application));
+  }
+
+  @Override
+  public boolean deleteWorkflow(String account, String app, String workflowId)
+                                throws MetadataServiceException, TException {
+    return delete(workflowHelper, new Account(account), new Workflow(workflowId, app));
+  }
+
+  @Override
+  public boolean updateWorkflow(String accountId, Workflow workflow) throws
+    MetadataServiceException, TException {
+    return update(workflowHelper, new Account(accountId), workflow);
+  }
 }

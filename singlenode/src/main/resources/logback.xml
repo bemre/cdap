@@ -12,10 +12,12 @@
     <!--
       Disabling some chatty loggers.
     -->
-    <logger name="org.apache.mina.core.filterchain" level="WARN"/>
-    <logger name="org.apache.mina.filter.codec" level="WARN"/>
+    <logger name="org.apache.commons.beanutils" level="ERROR"/>
     <logger name="org.apache.zookeeper.server" level="ERROR"/>
     <logger name="org.apache.zookeeper" level="ERROR"/>
+    <logger name="org.ning.http.client" level="WARN"/>
+    <logger name="org.apache.hadoop" level="WARN"/>
+    <logger name="org.quartz.core" level="WARN"/>
 
     <appender name="Rolling" class="ch.qos.logback.core.rolling.RollingFileAppender">
 
@@ -24,7 +26,7 @@
             <pattern>%d{ISO8601} - %-5p [%t:%C{1}@%L] - %m%n</pattern>
         </encoder>
         <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-            <level>INFO</level>
+            <level>WARN</level>
         </filter>
         <rollingPolicy class="ch.qos.logback.core.rolling.FixedWindowRollingPolicy">
             <maxIndex>10</maxIndex>

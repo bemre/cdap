@@ -14,7 +14,6 @@ else
   exit 0
 fi
 
-# Determine service name from the name of the symlink being run
 SVCNAME=`basename $0`
 
 if [[ "X$SVCNAME" == "Xsvc" ]]; then
@@ -35,7 +34,8 @@ if [[ $? -ne 0 ]]; then
 fi
 
 # Determine package name by applying regex to the target of the symlink being run
-PKGNAME=`echo $TARGET | sed -e 's:/opt/continuuity/\([^/]*\)/.*:\1:'`
+D1=`dirname $TARGET`; D2=`dirname $D1`
+PKGNAME=`basename $D2`
 if [[ "X$PKGNAME" == "X" ]]; then
   echo "Create a soft link to this script as svc-<component>"
   echo "E.g. ln -s service svc-<component>"
@@ -45,6 +45,11 @@ fi
 # Default CONTINUUITY_HOME to /opt/continuuity (package default)
 if [ ! -n "$CONTINUUITY_HOME" ]; then
   CONTINUUITY_HOME="/opt/continuuity"
+fi
+
+# Default CONTINUUITY_HADOOP_LIBS_HOME to /opt/continuuity/hadoop-libs (package default)
+if [ ! -n "$CONTINUUITY_HADOOP_LIBS_HOME" ]; then
+  CONTINUUITY_HADOOP_LIBS_HOME="/opt/continuuity/hadoop-libs"
 fi
 
 # Default CONTINUUITY_CONF to /etc/continuuity (package default)
@@ -86,14 +91,13 @@ start() {
     if [ $MAIN_CMD ]; then
       # This app is configured as a NON-JAVA app
 
-      rotate_log $loglog
       check_before_start
 
       echo "`date` Starting $APP service on `hostname`"
       echo "`date` Starting $APP service on `hostname`" >> $loglog
       echo "`ulimit -a`" >> $loglog 2>&1
 
-      nice -n $NICENESS $MAIN_CMD $MAIN_CMD_ARGS </dev/null >$loglog 2>&1 &
+      nohup nice -n $NICENESS $MAIN_CMD $MAIN_CMD_ARGS </dev/null >>$loglog 2>&1 &
 
       echo $! >$pid
     elif [ $MAIN_CLASS ]; then
@@ -104,22 +108,21 @@ start() {
 
       # Setup classpaths.
       if [ "$CLASSPATH" = "" ]; then
-        CLASSPATH=$COMPONENT_HOME/lib/*:$CONTINUUITY_CONF/:$COMPONENT_HOME/conf/:$EXTRA_CLASSPATH
+        CLASSPATH=$COMPONENT_HOME/lib/*:$CONTINUUITY_HADOOP_LIBS_HOME/lib/*:$CONTINUUITY_CONF/:$COMPONENT_HOME/conf/:$EXTRA_CLASSPATH
       else
-        CLASSPATH=$CLASSPATH:$COMPONENT_HOME/lib/*:$CONTINUUITY_CONF/:$COMPONENT_HOME/conf/:$EXTRA_CLASSPATH
+        CLASSPATH=$CLASSPATH:$COMPONENT_HOME/lib/*:$CONTINUUITY_HADOOP_LIBS_HOME/lib/*:$CONTINUUITY_CONF/:$COMPONENT_HOME/conf/:$EXTRA_CLASSPATH
       fi
 
       # sets the JAVA variable.
       set_java
 
-      rotate_log $loggc
       check_before_start
 
       echo "`date` Starting Java $APP service on `hostname`"
       echo "`date` Starting Java $APP service on `hostname`" >> $loglog
       echo "`ulimit -a`" >> $loglog 2>&1
 
-      nice -n $NICENESS "$JAVA" "$OPTS" -cp $CLASSPATH "$JAVA_HEAPMAX" $MAIN_CLASS $MAIN_CLASS_ARGS </dev/null >$loglog 2>&1 &
+      nohup nice -n $NICENESS "$JAVA" "$OPTS" -cp $CLASSPATH "$JAVA_HEAPMAX" $MAIN_CLASS $MAIN_CLASS_ARGS </dev/null >>$loglog 2>&1 &
       echo $! >$pid
 
     else

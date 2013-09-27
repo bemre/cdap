@@ -3,8 +3,8 @@ package com.continuuity.api.data.dataset;
 import com.continuuity.api.common.Bytes;
 import com.continuuity.api.data.DataSet;
 import com.continuuity.api.data.DataSetSpecification;
-import com.continuuity.api.data.OperationException;
 import com.continuuity.data.dataset.DataSetTestBase;
+import com.continuuity.data2.transaction.TransactionContext;
 import com.google.gson.Gson;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -41,7 +41,7 @@ public class SimpleTimeseriesTableTest extends DataSetTestBase {
   @Test
   public void testDataSet() throws Exception {
 
-    newTransaction(Mode.Sync);
+    TransactionContext txContext = newTransaction();
 
     byte[] metric1 = Bytes.toBytes("metric1");
     byte[] metric2 = Bytes.toBytes("metric2");
@@ -110,8 +110,8 @@ public class SimpleTimeseriesTableTest extends DataSetTestBase {
   }
 
   @Test(expected = IllegalArgumentException.class)
-  public void testInvalidTimeRangeCondition() throws OperationException {
-    newTransaction(Mode.Sync);
+  public void testInvalidTimeRangeCondition() throws Exception {
+    TransactionContext txContext = newTransaction();
     long ts = System.currentTimeMillis();
     table.read(Bytes.toBytes("any"), ts, ts - 100);
   }

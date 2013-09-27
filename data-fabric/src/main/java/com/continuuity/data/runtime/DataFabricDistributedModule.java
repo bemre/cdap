@@ -1,17 +1,30 @@
 package com.continuuity.data.runtime;
 
 import com.continuuity.common.conf.CConfiguration;
-import com.continuuity.data.engine.hbase.HBaseOVCTableHandle;
-import com.continuuity.data.engine.memory.oracle.MemoryStrictlyMonotonicTimeOracle;
+import com.continuuity.common.conf.Constants;
+import com.continuuity.data.DataSetAccessor;
+import com.continuuity.data.DistributedDataSetAccessor;
+import com.continuuity.data.metadata.MetaDataStore;
+import com.continuuity.data.metadata.SerializingMetaDataStore;
 import com.continuuity.data.operation.executor.OperationExecutor;
 import com.continuuity.data.operation.executor.omid.OmidTransactionalOperationExecutor;
-import com.continuuity.data.operation.executor.omid.TimestampOracle;
-import com.continuuity.data.operation.executor.omid.TransactionOracle;
-import com.continuuity.data.operation.executor.omid.memory.MemoryOracle;
 import com.continuuity.data.operation.executor.remote.RemoteOperationExecutor;
-import com.continuuity.data.table.OVCTableHandle;
+import com.continuuity.data2.queue.QueueClientFactory;
+import com.continuuity.data2.transaction.DefaultTransactionExecutor;
+import com.continuuity.data2.transaction.TransactionExecutor;
+import com.continuuity.data2.transaction.TransactionExecutorFactory;
+import com.continuuity.data2.transaction.TransactionSystemClient;
+import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
+import com.continuuity.data2.transaction.persist.HDFSTransactionStateStorage;
+import com.continuuity.data2.transaction.persist.NoOpTransactionStateStorage;
+import com.continuuity.data2.transaction.persist.TransactionStateStorage;
+import com.continuuity.data2.transaction.queue.QueueAdmin;
+import com.continuuity.data2.transaction.queue.hbase.HBaseQueueAdmin;
+import com.continuuity.data2.transaction.queue.hbase.HBaseQueueClientFactory;
+import com.continuuity.data2.transaction.server.TalkingToOpexTxSystemClient;
 import com.google.inject.AbstractModule;
 import com.google.inject.Singleton;
+import com.google.inject.assistedinject.FactoryModuleBuilder;
 import com.google.inject.name.Names;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseConfiguration;
@@ -34,8 +47,7 @@ public class DataFabricDistributedModule extends AbstractModule {
    * Create a module with default configuration for HBase and Continuuity.
    */
   public DataFabricDistributedModule() {
-    this.conf = loadConfiguration();
-    this.hbaseConf = HBaseConfiguration.create();
+    this(CConfiguration.create(), HBaseConfiguration.create());
   }
 
   /**
@@ -43,8 +55,7 @@ public class DataFabricDistributedModule extends AbstractModule {
    * and defaults for Continuuity.
    */
   public DataFabricDistributedModule(Configuration conf) {
-    this.hbaseConf = new Configuration(conf);
-    this.conf = loadConfiguration();
+    this(CConfiguration.create(), conf);
   }
 
   /**
@@ -52,27 +63,19 @@ public class DataFabricDistributedModule extends AbstractModule {
    * be used both for HBase and for Continuuity.
    */
   public DataFabricDistributedModule(CConfiguration conf) {
-    this.hbaseConf = new Configuration();
-    this.conf = conf;
+    this(conf, HBaseConfiguration.create());
   }
 
-  private CConfiguration loadConfiguration() {
-    @SuppressWarnings("UnnecessaryLocalVariable") CConfiguration conf = CConfiguration.create();
-
-    // this expects the port and number of threads for the opex service
-    // - data.opex.server.port <int>
-    // - data.opex.server.threads <int>
-    // this expects the zookeeper quorum for continuuity and for hbase
-    // - zookeeper.quorum host:port,...
-    // - hbase.zookeeper.quorum host:port,...
-    return conf;
+  /**
+   * Create a module with custom configuration for HBase and Continuuity.
+   */
+  public DataFabricDistributedModule(CConfiguration conf, Configuration hbaseConf) {
+    this.conf = conf;
+    this.hbaseConf = hbaseConf;
   }
 
   @Override
   public void configure() {
-
-    Class<? extends OVCTableHandle> ovcTableHandle = HBaseOVCTableHandle.class;
-    Log.info("Table Handle is " + ovcTableHandle.getName());
 
     // Bind our implementations
 
@@ -82,11 +85,6 @@ public class DataFabricDistributedModule extends AbstractModule {
     // For data fabric, bind to Omid and HBase
     bind(OperationExecutor.class).annotatedWith(Names.named("DataFabricOperationExecutor"))
         .to(OmidTransactionalOperationExecutor.class).in(Singleton.class);
-    bind(OVCTableHandle.class).to(ovcTableHandle);
-
-    // For now, just bind to in-memory omid oracles
-    bind(TimestampOracle.class).to(MemoryStrictlyMonotonicTimeOracle.class).in(Singleton.class);
-    bind(TransactionOracle.class).to(MemoryOracle.class).in(Singleton.class);
 
     // Bind HBase configuration into ovctable
     bind(Configuration.class).annotatedWith(Names.named("HBaseOVCTableHandleHConfig")).toInstance(hbaseConf);
@@ -97,6 +95,25 @@ public class DataFabricDistributedModule extends AbstractModule {
     // Bind our configurations
     bind(CConfiguration.class).annotatedWith(Names.named("RemoteOperationExecutorConfig")).toInstance(conf);
     bind(CConfiguration.class).annotatedWith(Names.named("DataFabricOperationExecutorConfig")).toInstance(conf);
+
+    // bind meta data store
+    bind(MetaDataStore.class).to(SerializingMetaDataStore.class).in(Singleton.class);
+
+    // Bind TxDs2 stuff
+    if (conf.getBoolean(Constants.TransactionManager.CFG_DO_PERSIST, true)) {
+      bind(TransactionStateStorage.class).to(HDFSTransactionStateStorage.class).in(Singleton.class);
+    } else {
+      bind(TransactionStateStorage.class).to(NoOpTransactionStateStorage.class).in(Singleton.class);
+    }
+    bind(DataSetAccessor.class).to(DistributedDataSetAccessor.class).in(Singleton.class);
+    bind(InMemoryTransactionManager.class).in(Singleton.class);
+    bind(TransactionSystemClient.class).to(TalkingToOpexTxSystemClient.class).in(Singleton.class);
+    bind(QueueClientFactory.class).to(HBaseQueueClientFactory.class).in(Singleton.class);
+    bind(QueueAdmin.class).to(HBaseQueueAdmin.class).in(Singleton.class);
+
+    install(new FactoryModuleBuilder()
+              .implement(TransactionExecutor.class, DefaultTransactionExecutor.class)
+              .build(TransactionExecutorFactory.class));
   }
 
   public CConfiguration getConfiguration() {

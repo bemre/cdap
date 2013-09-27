@@ -5,27 +5,28 @@
 package com.continuuity.logging.run;
 
 import com.continuuity.common.conf.CConfiguration;
-import com.continuuity.data.engine.memory.MemoryOVCTableHandle;
-import com.continuuity.data.engine.memory.oracle.MemoryStrictlyMonotonicTimeOracle;
-import com.continuuity.data.operation.executor.OperationExecutor;
-import com.continuuity.data.operation.executor.omid.OmidTransactionalOperationExecutor;
-import com.continuuity.data.operation.executor.omid.TimestampOracle;
-import com.continuuity.data.operation.executor.omid.TransactionOracle;
-import com.continuuity.data.operation.executor.omid.memory.MemoryOracle;
+import com.continuuity.common.conf.Constants;
+import com.continuuity.common.conf.KafkaConstants;
+import com.continuuity.data.DataSetAccessor;
+import com.continuuity.data.DistributedDataSetAccessor;
 import com.continuuity.data.operation.executor.remote.RemoteOperationExecutor;
-import com.continuuity.data.table.OVCTableHandle;
+import com.continuuity.data2.transaction.TransactionSystemClient;
+import com.continuuity.data2.transaction.server.TalkingToOpexTxSystemClient;
+import com.continuuity.internal.kafka.client.ZKKafkaClientService;
+import com.continuuity.kafka.client.KafkaClientService;
+import com.continuuity.logging.LoggingConfiguration;
 import com.continuuity.logging.save.LogSaver;
 import com.continuuity.weave.api.AbstractWeaveRunnable;
 import com.continuuity.weave.api.WeaveContext;
 import com.continuuity.weave.api.WeaveRunnableSpecification;
+import com.continuuity.weave.common.Services;
+import com.continuuity.weave.zookeeper.RetryStrategies;
+import com.continuuity.weave.zookeeper.ZKClientService;
+import com.continuuity.weave.zookeeper.ZKClientServices;
+import com.continuuity.weave.zookeeper.ZKClients;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
-import com.google.inject.AbstractModule;
-import com.google.inject.Guice;
-import com.google.inject.Injector;
-import com.google.inject.Module;
-import com.google.inject.Singleton;
-import com.google.inject.name.Names;
+import com.google.common.util.concurrent.Futures;
 import org.apache.hadoop.conf.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +34,9 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
+import static com.continuuity.data.operation.executor.remote.Constants.CFG_ZOOKEEPER_ENSEMBLE;
 
 /**
  * Weave wrapper for running LogSaver through Weave.
@@ -46,8 +50,8 @@ public final class LogSaverWeaveRunnable extends AbstractWeaveRunnable {
   private String name;
   private String hConfName;
   private String cConfName;
-
-  private CConfiguration cConf;
+  private ZKClientService zkClientService;
+  private KafkaClientService kafkaClientService;
 
   public LogSaverWeaveRunnable(String name, String hConfName, String cConfName) {
     this.name = name;
@@ -81,15 +85,46 @@ public final class LogSaverWeaveRunnable extends AbstractWeaveRunnable {
       hConf.clear();
       hConf.addResource(new File(configs.get("hConf")).toURI().toURL());
 
-      cConf = CConfiguration.create();
+      CConfiguration cConf = CConfiguration.create();
       cConf.clear();
       cConf.addResource(new File(configs.get("cConf")).toURI().toURL());
+      String baseDir = cConf.get(LoggingConfiguration.LOG_BASE_DIR);
+      if (baseDir != null) {
+        if (baseDir.startsWith("/")) {
+          baseDir = baseDir.substring(1);
+        }
+        cConf.set(LoggingConfiguration.LOG_BASE_DIR, cConf.get(Constants.CFG_HDFS_NAMESPACE) + "/" + baseDir);
+      }
 
-      int instanceId = context.getInstanceId();
+      DataSetAccessor dataSetAccessor = new DistributedDataSetAccessor(cConf, hConf);
+      TransactionSystemClient txClient = new TalkingToOpexTxSystemClient(new RemoteOperationExecutor(cConf));
 
-      Injector injector = Guice.createInjector(createModule());
+      // Initialize ZK client
+      String zookeeper = cConf.get(CFG_ZOOKEEPER_ENSEMBLE);
+      if (zookeeper == null) {
+        LOG.error("No zookeeper quorum provided.");
+        throw new IllegalStateException("No zookeeper quorum provided.");
+      }
 
-      logSaver = new LogSaver(injector.getInstance(OperationExecutor.class), instanceId, hConf, cConf);
+      zkClientService =
+        ZKClientServices.delegate(
+          ZKClients.reWatchOnExpire(
+            ZKClients.retryOnFailure(
+              ZKClientService.Builder.of(zookeeper).build(),
+              RetryStrategies.exponentialDelay(500, 2000, TimeUnit.MILLISECONDS)
+            )
+          ));
+
+      // Initialize Kafka client
+      String kafkaZKNamespace = cConf.get(KafkaConstants.ConfigKeys.ZOOKEEPER_NAMESPACE_CONFIG);
+      kafkaClientService = new ZKKafkaClientService(
+        kafkaZKNamespace == null
+          ? zkClientService
+          : ZKClients.namespace(zkClientService, "/" + kafkaZKNamespace)
+      );
+
+
+      logSaver = new LogSaver(dataSetAccessor, txClient, kafkaClientService, zkClientService, hConf, cConf);
 
       LOG.info("Runnable initialized: " + name);
     } catch (Throwable t) {
@@ -100,9 +135,16 @@ public final class LogSaverWeaveRunnable extends AbstractWeaveRunnable {
 
   @Override
   public void run() {
-    logSaver.startAndWait();
+    LOG.info("Starting runnable " + name);
+
+    Futures.getUnchecked(Services.chainStart(zkClientService, kafkaClientService, logSaver));
+
+    LOG.info("Runnable started " + name);
+
     try {
       runLatch.await();
+
+      LOG.info("Runnable stopped " + name);
     } catch (InterruptedException e) {
       LOG.error("Waiting on latch interrupted");
       Thread.currentThread().interrupt();
@@ -111,27 +153,9 @@ public final class LogSaverWeaveRunnable extends AbstractWeaveRunnable {
 
   @Override
   public void stop() {
-    logSaver.stopAndWait();
-    runLatch.countDown();
-  }
+    LOG.info("Stopping runnable " + name);
 
-  private Module createModule() {
-    return new AbstractModule() {
-      @Override
-      protected void configure() {
-        if (cConf.getBoolean("log.saver.run.opex.remote", true)) {
-          // Bind remote operation executor
-          bind(OperationExecutor.class).to(RemoteOperationExecutor.class).in(Singleton.class);
-          bind(CConfiguration.class).annotatedWith(Names.named("RemoteOperationExecutorConfig")).toInstance(cConf);
-        } else {
-          // Bind local opex for testing purpose.
-          bind(OperationExecutor.class).to(OmidTransactionalOperationExecutor.class).in(Singleton.class);
-          bind(TransactionOracle.class).to(MemoryOracle.class);
-          bind(TimestampOracle.class).to(MemoryStrictlyMonotonicTimeOracle.class);
-          bind(OVCTableHandle.class).toInstance(MemoryOVCTableHandle.getInstance());
-          bind(CConfiguration.class).annotatedWith(Names.named("DataFabricOperationExecutorConfig")).toInstance(cConf);
-        }
-      }
-    };
+    Futures.getUnchecked(Services.chainStart(logSaver, kafkaClientService, zkClientService));
+    runLatch.countDown();
   }
 }

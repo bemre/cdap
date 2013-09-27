@@ -2,7 +2,6 @@ package com.continuuity.internal.app.verification;
 
 import com.continuuity.api.ApplicationSpecification;
 import com.continuuity.app.verification.AbstractVerifier;
-import com.continuuity.app.verification.Verifier;
 import com.continuuity.app.verification.VerifyResult;
 import com.continuuity.error.Err;
 
@@ -18,7 +17,7 @@ import com.continuuity.error.Err;
  * </ul>
  * </p>
  */
-public class ApplicationVerification extends AbstractVerifier implements Verifier<ApplicationSpecification> {
+public class ApplicationVerification extends AbstractVerifier<ApplicationSpecification> {
 
   /**
    * Verifies {@link ApplicationSpecification} of the {@link com.continuuity.api.Application}
@@ -29,16 +28,26 @@ public class ApplicationVerification extends AbstractVerifier implements Verifie
    */
   @Override
   public VerifyResult verify(final ApplicationSpecification input) {
-    // Check if Application name is an ID or no.
-    if (!isId(input.getName())) {
-      return VerifyResult.failure(Err.NOT_AN_ID, "Application");
+    VerifyResult verifyResult = super.verify(input);
+
+    if (!verifyResult.isSuccess()) {
+      return verifyResult;
     }
 
-    // Check if there is at least one of the following : Flow & Procedure or MapReduce for now.
-    if (input.getProcedures().size() == 0 && input.getFlows().size() == 0 && input.getMapReduces().size() == 0) {
+    // Check if there is at least one of the following : Flow & Procedure or MapReduce or Workflow for now.
+    // TODO (terence): Logic here is really not good. Need to refactor.
+    if (input.getProcedures().isEmpty()
+        && input.getFlows().isEmpty()
+        && input.getMapReduces().isEmpty()
+        && input.getWorkflows().isEmpty()) {
       return VerifyResult.failure(Err.Application.ATLEAST_ONE_PROCESSOR, input.getName());
     }
 
     return VerifyResult.success();
+  }
+
+  @Override
+  protected String getName(ApplicationSpecification input) {
+    return input.getName();
   }
 }

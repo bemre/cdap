@@ -8,11 +8,15 @@ public class Constants {
 
   /** for the port of the opex server. */
   public static final String CFG_DATA_OPEX_SERVER_PORT
-      = "data.opex.server.port";
+      = "data.opex.bind.port";
 
   /** for the address (hostname) of the opex server. */
   public static final String CFG_DATA_OPEX_SERVER_ADDRESS
-      = "data.opex.server.address";
+      = "data.opex.bind.address";
+
+  /** the number of IO threads in the opex service. */
+  public static final String CFG_DATA_OPEX_SERVER_IO_THREADS
+      = "data.opex.server.io.threads";
 
   /** the number of handler threads in the opex service. */
   public static final String CFG_DATA_OPEX_SERVER_THREADS
@@ -25,6 +29,10 @@ public class Constants {
   /** default opex service address. */
   public static final String DEFAULT_DATA_OPEX_SERVER_ADDRESS
       = "0.0.0.0";
+
+  /** default number of handler IO threads in opex service. */
+  public static final int    DEFAULT_DATA_OPEX_SERVER_IO_THREADS
+      = 2;
 
   /** default number of handler threads in opex service. */
   public static final int    DEFAULT_DATA_OPEX_SERVER_THREADS

@@ -6,18 +6,23 @@ package com.continuuity.app.guice;
 import com.continuuity.app.runtime.ProgramRunner;
 import com.continuuity.app.runtime.ProgramRuntimeService;
 import com.continuuity.common.conf.CConfiguration;
+import com.continuuity.common.conf.Constants;
 import com.continuuity.internal.app.runtime.ProgramRunnerFactory;
 import com.continuuity.internal.app.runtime.distributed.DistributedFlowProgramRunner;
 import com.continuuity.internal.app.runtime.distributed.DistributedMapReduceProgramRunner;
 import com.continuuity.internal.app.runtime.distributed.DistributedProcedureProgramRunner;
 import com.continuuity.internal.app.runtime.distributed.DistributedProgramRuntimeService;
+import com.continuuity.internal.app.runtime.distributed.DistributedWorkflowProgramRunner;
 import com.continuuity.weave.api.WeaveRunner;
 import com.continuuity.weave.api.WeaveRunnerService;
+import com.continuuity.weave.filesystem.LocationFactories;
+import com.continuuity.weave.filesystem.LocationFactory;
 import com.continuuity.weave.yarn.YarnWeaveRunnerService;
 import com.google.common.base.Preconditions;
 import com.google.inject.PrivateModule;
 import com.google.inject.Provider;
 import com.google.inject.Provides;
+import com.google.inject.Scopes;
 import com.google.inject.Singleton;
 import com.google.inject.multibindings.MapBinder;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
@@ -32,8 +37,8 @@ final class DistributedProgramRunnerModule extends PrivateModule {
   @Override
   protected void configure() {
     // Bind and expose WeaveRunner
-    bind(WeaveRunner.class).to(YarnWeaveRunnerService.class);
-    bind(WeaveRunnerService.class).to(YarnWeaveRunnerService.class);
+    bind(WeaveRunnerService.class).to(AppFabricWeaveRunnerService.class);
+    bind(WeaveRunner.class).to(WeaveRunnerService.class);
 
     expose(WeaveRunner.class);
     expose(WeaveRunnerService.class);
@@ -44,18 +49,22 @@ final class DistributedProgramRunnerModule extends PrivateModule {
     runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.FLOW).to(DistributedFlowProgramRunner.class);
     runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.PROCEDURE).to(DistributedProcedureProgramRunner.class);
     runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.MAPREDUCE).to(DistributedMapReduceProgramRunner.class);
+    runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.WORKFLOW).to(DistributedWorkflowProgramRunner.class);
 
     // Bind and expose ProgramRuntimeService
-    bind(ProgramRuntimeService.class).to(DistributedProgramRuntimeService.class);
+    bind(ProgramRuntimeService.class).to(DistributedProgramRuntimeService.class).in(Scopes.SINGLETON);
     expose(ProgramRuntimeService.class);
   }
 
   @Singleton
   @Provides
   private YarnWeaveRunnerService provideYarnWeaveRunnerService(CConfiguration configuration,
-                                                               YarnConfiguration yarnConfiguration) {
-    String namespace = configuration.get("weave.zookeeper.namespace", "/weave");
-    return new YarnWeaveRunnerService(yarnConfiguration, configuration.get("zookeeper.quorum") + namespace);
+                                                               YarnConfiguration yarnConfiguration,
+                                                               LocationFactory locationFactory) {
+    String zkNamespace = configuration.get(Constants.CFG_WEAVE_ZK_NAMESPACE, "/weave");
+    return new YarnWeaveRunnerService(yarnConfiguration,
+                                      configuration.get(Constants.Zookeeper.QUORUM) + zkNamespace,
+                                      LocationFactories.namespace(locationFactory, "weave"));
   }
 
   @Singleton

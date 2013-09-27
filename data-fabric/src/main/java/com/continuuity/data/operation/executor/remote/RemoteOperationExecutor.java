@@ -1,42 +1,16 @@
 package com.continuuity.data.operation.executor.remote;
 
 import com.continuuity.api.data.OperationException;
-import com.continuuity.api.data.OperationResult;
 import com.continuuity.common.conf.CConfiguration;
-import com.continuuity.data.operation.ClearFabric;
-import com.continuuity.data.operation.GetSplits;
-import com.continuuity.data.operation.Increment;
-import com.continuuity.data.operation.KeyRange;
-import com.continuuity.data.operation.OpenTable;
-import com.continuuity.data.operation.OperationContext;
-import com.continuuity.data.operation.Read;
-import com.continuuity.data.operation.ReadAllKeys;
-import com.continuuity.data.operation.ReadColumnRange;
-import com.continuuity.data.operation.Scan;
 import com.continuuity.data.operation.StatusCode;
-import com.continuuity.data.operation.TruncateTable;
-import com.continuuity.data.operation.WriteOperation;
 import com.continuuity.data.operation.executor.OperationExecutor;
-import com.continuuity.data.operation.executor.Transaction;
-import com.continuuity.data.operation.ttqueue.DequeueResult;
-import com.continuuity.data.operation.ttqueue.QueueDequeue;
-import com.continuuity.data.operation.ttqueue.admin.GetGroupID;
-import com.continuuity.data.operation.ttqueue.admin.GetQueueInfo;
-import com.continuuity.data.operation.ttqueue.admin.QueueConfigure;
-import com.continuuity.data.operation.ttqueue.admin.QueueConfigureGroups;
-import com.continuuity.data.operation.ttqueue.admin.QueueDropInflight;
-import com.continuuity.data.operation.ttqueue.admin.QueueInfo;
-import com.continuuity.data.table.Scanner;
 import com.google.inject.Inject;
 import com.google.inject.name.Named;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import java.util.Collection;
 
 /**
  * An operation executor that delegates all operations to a remote
@@ -217,374 +191,90 @@ public class RemoteOperationExecutor
   }
 
   @Override
-  public void commit(final OperationContext context, final List<WriteOperation> writes)
-      throws OperationException {
-    this.execute(
-        new Operation<Boolean>("Batch") {
-          @Override
-          public Boolean execute(OperationExecutorClient client)
-              throws OperationException, TException {
-            client.execute(context, writes);
-            return true;
-          }
-        });
-  }
-
-  @Override
-  public Transaction startTransaction(final OperationContext context, final boolean trackChanges)
-    throws OperationException {
+  public com.continuuity.data2.transaction.Transaction startLong() throws OperationException {
     return this.execute(
-      new Operation<Transaction>("startTransaction") {
+      new Operation<com.continuuity.data2.transaction.Transaction>("startTx") {
         @Override
-        public Transaction execute(OperationExecutorClient client)
-          throws OperationException, TException {
-          return client.startTransaction(context, trackChanges);
+        public com.continuuity.data2.transaction.Transaction execute(OperationExecutorClient client)
+          throws TException, OperationException {
+          return client.startLong();
         }
       });
   }
 
   @Override
-  public Transaction execute(final OperationContext context,
-                             final Transaction transaction,
-                             final List<WriteOperation> writes)
-    throws OperationException {
+  public com.continuuity.data2.transaction.Transaction startShort() throws OperationException {
     return this.execute(
-      new Operation<Transaction>("execute batch") {
+      new Operation<com.continuuity.data2.transaction.Transaction>("startTx") {
         @Override
-        public Transaction execute(OperationExecutorClient client)
-          throws OperationException, TException {
-          return client.execute(context, transaction, writes);
+        public com.continuuity.data2.transaction.Transaction execute(OperationExecutorClient client)
+          throws TException, OperationException {
+          return client.startShort();
         }
       });
   }
 
   @Override
-  public void commit(final OperationContext context,
-                     final Transaction transaction)
-    throws OperationException {
-    this.execute(
-      new Operation<Boolean>("Commit") {
+  public com.continuuity.data2.transaction.Transaction startShort(final int timeout) throws OperationException {
+    return this.execute(
+      new Operation<com.continuuity.data2.transaction.Transaction>("startTx") {
         @Override
-        public Boolean execute(OperationExecutorClient client)
-          throws OperationException, TException {
-          client.commit(context, transaction);
-          return true;
+        public com.continuuity.data2.transaction.Transaction execute(OperationExecutorClient client)
+          throws TException, OperationException {
+          return client.startShort(timeout);
         }
       });
   }
 
   @Override
-  public void commit(final OperationContext context,
-                     final Transaction transaction,
-                     final List<WriteOperation> writes)
-    throws OperationException {
-    this.execute(new Operation<Boolean>("Execute+Commit") {
-      @Override
-      public Boolean execute(OperationExecutorClient client) throws OperationException, TException {
-        client.commit(context, transaction, writes);
-        return true;
-      }
-    });
-  }
-
-  @Override
-  public void abort(final OperationContext context,
-                    final Transaction transaction)
-    throws OperationException {
-    this.execute(
-      new Operation<Boolean>("Abort") {
-        @Override
-        public Boolean execute(OperationExecutorClient client)
-          throws OperationException, TException {
-          client.abort(context, transaction);
-          return true;
-        }
-      });
-  }
-
-  @Override
-  public Map<byte[], Long> increment(final OperationContext context,
-                                     final Increment increment)
-    throws OperationException {
-    return this.execute(new Operation<Map<byte[], Long>>("Increment") {
-      @Override
-      public Map<byte[], Long> execute(OperationExecutorClient client)
-        throws OperationException, TException {
-        return client.increment(context, increment);
-      }
-    });
-  }
-
-  @Override
-  public Map<byte[], Long> increment(final OperationContext context,
-                                     final Transaction transaction,
-                                     final Increment increment)
-    throws OperationException {
-    return this.execute(new Operation<Map<byte[], Long>>("Increment") {
-      @Override
-      public Map<byte[], Long> execute(OperationExecutorClient client)
-        throws OperationException, TException {
-        return client.increment(context, transaction, increment);
-      }
-    });
-  }
-
-  @Override
-  public DequeueResult execute(final OperationContext context,
-                               final QueueDequeue dequeue)
-      throws OperationException {
-    return this.execute(
-        new Operation<DequeueResult>("DequeuePayload") {
-          @Override
-          public DequeueResult execute(OperationExecutorClient client)
-              throws OperationException, TException {
-            return client.execute(context, dequeue);
-          }
-        });
-  }
-
-  @Override
-  public long execute(final OperationContext context,
-                      final GetGroupID getGroupID)
-      throws OperationException {
-    return this.execute(
-        new Operation<Long>("GetGroupID") {
-          @Override
-          public Long execute(OperationExecutorClient client)
-              throws TException, OperationException {
-            return client.execute(context, getGroupID);
-          }
-        });
-  }
-
-  @Override
-  public OperationResult<QueueInfo> execute(final OperationContext context,
-                                            final GetQueueInfo getQueueInfo)
-      throws OperationException {
-    return this.execute(new Operation<
-            OperationResult<QueueInfo>>("GetQueueInfo") {
-          @Override
-          public OperationResult<QueueInfo>
-          execute(OperationExecutorClient client)
-              throws OperationException, TException {
-            return client.execute(context, getQueueInfo);
-          }
-        }, this.longClientProvider);
-  }
-
-  @Override
-  public void execute(final OperationContext context,
-                      final ClearFabric clearFabric)
-      throws OperationException {
-    this.execute(
-        new Operation<Boolean>("ClearFabric") {
-          @Override
-          public Boolean execute(OperationExecutorClient client)
-              throws TException, OperationException {
-            client.execute(context, clearFabric);
-            return true;
-          }
-        }, this.longClientProvider);
-  }
-
-  @Override
-  public void execute(final OperationContext context,
-                      final OpenTable openTable) throws OperationException {
-    this.execute(
-        new Operation<Boolean>("OpenTable") {
-          @Override
-          public Boolean execute(OperationExecutorClient client)
-              throws TException, OperationException {
-            client.execute(context, openTable);
-            return true;
-          }
-        });
-  }
-
-  @Override
-  public void execute(final OperationContext context,
-                      final TruncateTable truncateTable) throws OperationException {
-    this.execute(
-        new Operation<Boolean>("TruncateTable") {
-          @Override
-          public Boolean execute(OperationExecutorClient client)
-              throws TException, OperationException {
-            client.execute(context, truncateTable);
-            return true;
-          }
-        }, this.longClientProvider);
-  }
-
-  @Override
-  public OperationResult<Map<byte[], byte[]>> execute(final OperationContext context,
-                                                      final Read read)
+  public boolean canCommit(final com.continuuity.data2.transaction.Transaction tx, final Collection<byte[]> changeIds)
     throws OperationException {
     return this.execute(
-        new Operation<OperationResult<Map<byte[], byte[]>>>("Read") {
-          @Override
-          public OperationResult<Map<byte[], byte[]>>
-          execute(OperationExecutorClient client)
-            throws OperationException, TException {
-            return client.execute(context, read);
-          }
-        });
-  }
-
-  @Override
-  public OperationResult<Map<byte[], byte[]>> execute(final OperationContext context,
-                                                      final Transaction transaction,
-                                                      final Read read)
-    throws OperationException {
-    return this.execute(new Operation<OperationResult<Map<byte[], byte[]>>>("Read") {
-      @Override
-      public OperationResult<Map<byte[], byte[]>> execute(OperationExecutorClient client)
-        throws OperationException, TException {
-        return client.execute(context, transaction, read);
-      }
-    });
-  }
-
-  @Override
-  public OperationResult<List<byte[]>> execute(final OperationContext context,
-                                               final ReadAllKeys readAllKeys)
-    throws OperationException {
-    return this.execute(
-      new Operation<OperationResult<List<byte[]>>>("ReadAllKeys") {
-        @Override
-        public OperationResult<List<byte[]>>
-        execute(OperationExecutorClient client)
-          throws OperationException, TException {
-          return client.execute(context, readAllKeys);
-        }
-      });
-  }
-
-  @Override
-  public OperationResult<List<byte[]>> execute(final OperationContext context,
-                                               final Transaction transaction,
-                                               final ReadAllKeys readAllKeys)
-    throws OperationException {
-    return this.execute(new Operation<OperationResult<List<byte[]>>>("ReadAllKeys") {
-      @Override
-      public OperationResult<List<byte[]>> execute(OperationExecutorClient client)
-        throws OperationException, TException {
-        return client.execute(context, transaction, readAllKeys);
-      }
-    });
-  }
-
-  @Override
-  public OperationResult<List<KeyRange>> execute(final OperationContext context,
-                                                 final GetSplits getSplits)
-    throws OperationException {
-    return this.execute(
-      new Operation<OperationResult<List<KeyRange>>>("GetSplits") {
-        @Override
-        public OperationResult<List<KeyRange>> execute(OperationExecutorClient client)
-          throws OperationException, TException {
-          return client.execute(context, getSplits);
-        }
-      });
-  }
-
-  @Override
-  public OperationResult<List<KeyRange>> execute(final OperationContext context,
-                                                 final Transaction transaction,
-                                                 final GetSplits getSplits)
-    throws OperationException {
-    return this.execute(
-      new Operation<OperationResult<List<KeyRange>>>("GetSplits") {
-        @Override
-        public OperationResult<List<KeyRange>> execute(OperationExecutorClient client)
-          throws OperationException, TException {
-          return client.execute(context, transaction, getSplits);
-        }
-      });
-  }
-
-  @Override
-  public OperationResult<Map<byte[], byte[]>> execute(final OperationContext context,
-                                                      final ReadColumnRange readColumnRange)
-    throws OperationException {
-    return this.execute(new Operation<
-      OperationResult<Map<byte[], byte[]>>>("ReadColumnRange") {
-      @Override
-      public OperationResult<Map<byte[], byte[]>>
-      execute(OperationExecutorClient client)
-        throws OperationException, TException {
-        return client.execute(context, readColumnRange);
-      }
-    });
-  }
-
-  @Override
-  public OperationResult<Map<byte[], byte[]>> execute(final OperationContext context,
-                                                      final Transaction transaction,
-                                                      final ReadColumnRange readColumnRange)
-    throws OperationException {
-    return this.execute(new Operation<OperationResult<Map<byte[], byte[]>>>("ReadColumnRange") {
-      @Override
-      public OperationResult<Map<byte[], byte[]>> execute(OperationExecutorClient client) throws OperationException,
-        TException {
-        return client.execute(context, transaction, readColumnRange);
-      }
-    });
-  }
-
-  @Override
-  public void execute(final OperationContext context, final QueueConfigure configure)
-    throws OperationException {
-    this.execute(
-      new Operation<Boolean>("QueueConfigure") {
+      new Operation<Boolean>("canCommit") {
         @Override
         public Boolean execute(OperationExecutorClient client)
           throws TException, OperationException {
-          client.execute(context, configure);
-          return true;
+          return client.canCommit(tx, changeIds);
         }
       });
   }
 
   @Override
-  public void execute(final OperationContext context, final QueueConfigureGroups configure) throws OperationException {
-    this.execute(
-      new Operation<Boolean>("QueueConfigureGroups") {
+  public boolean commit(final com.continuuity.data2.transaction.Transaction tx) throws OperationException {
+    return this.execute(
+      new Operation<Boolean>("commit") {
         @Override
         public Boolean execute(OperationExecutorClient client)
           throws TException, OperationException {
-          client.execute(context, configure);
-          return true;
+          return client.commit(tx);
         }
       });
   }
 
   @Override
-  public void execute(final OperationContext context, final QueueDropInflight op) throws OperationException {
+  public void abort(final com.continuuity.data2.transaction.Transaction tx) throws OperationException {
     this.execute(
-      new Operation<Boolean>("QueueDropInflight") {
+      new Operation<Boolean>("abort") {
         @Override
         public Boolean execute(OperationExecutorClient client)
           throws TException, OperationException {
-          client.execute(context, op);
+          client.abort(tx);
           return true;
         }
       });
   }
 
   @Override
-  public Scanner scan(OperationContext context, @Nullable Transaction transaction, Scan scan)
-    throws OperationException {
-    throw new UnsupportedOperationException("Remote operation executor does not support scans.");
+  public void invalidate(final com.continuuity.data2.transaction.Transaction tx) throws OperationException {
+    this.execute(
+      new Operation<Boolean>("invalidate") {
+        @Override
+        public Boolean execute(OperationExecutorClient client)
+          throws TException, OperationException {
+          client.invalidate(tx);
+          return true;
+        }
+      });
   }
 
-  @Override
-  public void commit(final OperationContext context, final WriteOperation write)
-      throws OperationException {
-    this.commit(context, Collections.singletonList(write));
-  }
-
-  @Override
-  public String getName() {
-    return "remote";
-  }
 }

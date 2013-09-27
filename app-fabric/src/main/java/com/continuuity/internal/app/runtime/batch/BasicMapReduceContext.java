@@ -3,7 +3,6 @@ package com.continuuity.internal.app.runtime.batch;
 import com.continuuity.api.batch.MapReduceContext;
 import com.continuuity.api.batch.MapReduceSpecification;
 import com.continuuity.api.data.DataSet;
-import com.continuuity.api.data.OperationException;
 import com.continuuity.api.data.batch.BatchReadable;
 import com.continuuity.api.data.batch.BatchWritable;
 import com.continuuity.api.data.batch.Split;
@@ -15,7 +14,7 @@ import com.continuuity.common.logging.LoggingContext;
 import com.continuuity.common.metrics.MetricsCollectionService;
 import com.continuuity.common.metrics.MetricsCollector;
 import com.continuuity.common.metrics.MetricsScope;
-import com.continuuity.data.operation.executor.TransactionAgent;
+import com.continuuity.data2.transaction.TransactionAware;
 import com.continuuity.internal.app.runtime.AbstractContext;
 import com.continuuity.logging.context.MapReduceLoggingContext;
 import com.continuuity.weave.api.RunId;
@@ -30,32 +29,44 @@ import java.util.Map;
  * Mapreduce job runtime context
  */
 public class BasicMapReduceContext extends AbstractContext implements MapReduceContext {
-  private final MapReduceSpecification spec;
-  private Job job;
 
+  private final MapReduceSpecification spec;
   private final MapReduceLoggingContext loggingContext;
+  private final MetricsCollector systemMapperMetrics;
+  private final MetricsCollector systemReducerMetrics;
+  private final Arguments runtimeArguments;
+  private final long logicalStartTime;
 
   private BatchReadable inputDataset;
   private List<Split> inputDataSelection;
   private BatchWritable outputDataset;
-  private final MetricsCollector systemMapperMetrics;
-  private final MetricsCollector systemReducerMetrics;
-  private final TransactionAgent txAgent;
-  private final Arguments runtimeArguments;
+  private Job job;
 
-  public BasicMapReduceContext(Program program, RunId runId, Arguments runtimeArguments,
-                               TransactionAgent txAgent, Map<String, DataSet> datasets,
-                               MapReduceSpecification spec) {
-    this(program, runId, runtimeArguments, txAgent, datasets, spec, null);
+  // todo: having it here seems like a hack will be fixed with further post-integration refactoring
+  private final Iterable<TransactionAware> txAwares;
+
+  public BasicMapReduceContext(Program program,
+                               RunId runId,
+                               Arguments runtimeArguments,
+                               Map<String, DataSet> datasets,
+                               MapReduceSpecification spec,
+                               Iterable<TransactionAware> txAwares,
+                               long logicalStartTime) {
+    this(program, runId, runtimeArguments, datasets, spec, txAwares, logicalStartTime, null);
   }
 
 
-  public BasicMapReduceContext(Program program, RunId runId, Arguments runtimeArguments,
-                               TransactionAgent txAgent, Map<String, DataSet> datasets,
-                               MapReduceSpecification spec, MetricsCollectionService metricsCollectionService) {
+  public BasicMapReduceContext(Program program,
+                               RunId runId,
+                               Arguments runtimeArguments,
+                               Map<String, DataSet> datasets,
+                               MapReduceSpecification spec,
+                               Iterable<TransactionAware> txAwares,
+                               long logicalStartTime,
+                               MetricsCollectionService metricsCollectionService) {
     super(program, runId, datasets);
     this.runtimeArguments = runtimeArguments;
-    this.txAgent = txAgent;
+    this.logicalStartTime = logicalStartTime;
 
     if (metricsCollectionService != null) {
       this.systemMapperMetrics = getMetricsCollector(MetricsScope.REACTOR, metricsCollectionService,
@@ -68,6 +79,7 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
     }
     this.loggingContext = new MapReduceLoggingContext(getAccountId(), getApplicationId(), getProgramName());
     this.spec = spec;
+    this.txAwares = txAwares;
   }
 
   @Override
@@ -80,6 +92,11 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
   @Override
   public MapReduceSpecification getSpecification() {
     return spec;
+  }
+
+  @Override
+  public long getLogicalStartTime() {
+    return logicalStartTime;
   }
 
   public void setJob(Job job) {
@@ -143,10 +160,6 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
     return outputDataset;
   }
 
-  public void flushOperations() throws OperationException {
-    txAgent.flush();
-  }
-
   Arguments getRuntimeArgs() {
     return runtimeArguments;
   }
@@ -161,4 +174,9 @@ public class BasicMapReduceContext extends AbstractContext implements MapReduceC
     return arguments.build();
   }
 
+  public void flushOperations() throws Exception {
+    for (TransactionAware txAware : txAwares) {
+      txAware.commitTx();
+    }
+  }
 }

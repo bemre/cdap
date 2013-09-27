@@ -46,4 +46,18 @@ test {
  */
 jar.exclude '*.xml'
 
+/**
+ * Use io.netty instead of org.jboss.netty
+ */
+configurations {
+    all*.exclude group: 'org.jboss.netty', module: 'netty'
+    all*.exclude group: 'asm', module: 'asm'
+}
 
+/**
+ * Excludes Tests that are part of tests. 
+ */
+test {
+  exclude '**/v2/handlers/v2/**'
+  exclude '**/v2/tools/**'
+}

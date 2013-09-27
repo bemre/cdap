@@ -2,21 +2,35 @@ package com.continuuity.internal.app.queue;
 
 import com.continuuity.api.flow.flowlet.InputContext;
 import com.continuuity.app.queue.InputDatum;
-import com.continuuity.data.operation.executor.TransactionAgent;
+import com.google.common.base.Objects;
 import com.google.common.collect.Iterators;
 
 import java.nio.ByteBuffer;
 import java.util.Iterator;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * An {@link com.continuuity.app.queue.InputDatum} that has nothing inside and is not from queue.
  */
 public final class NullInputDatum implements InputDatum {
 
-  @Override
-  public void submitAck(TransactionAgent txAgent) {
-    // no-op
-  }
+  private final AtomicInteger retries = new AtomicInteger(0);
+  private final InputContext inputContext =  new InputContext() {
+    @Override
+    public String getOrigin() {
+      return "";
+    }
+
+    @Override
+    public int getRetryCount() {
+      return retries.get();
+    }
+
+    @Override
+    public String toString() {
+      return "nullInput";
+    }
+  };
 
   @Override
   public boolean needProcess() {
@@ -24,32 +38,39 @@ public final class NullInputDatum implements InputDatum {
   }
 
   @Override
-  public Iterator<ByteBuffer> getData() {
-    return Iterators.emptyIterator();
-  }
-
-  @Override
   public void incrementRetry() {
-    // No-op
+    retries.incrementAndGet();
   }
 
   @Override
   public int getRetry() {
-    return Integer.MAX_VALUE;
+    return retries.get();
   }
 
   @Override
   public InputContext getInputContext() {
-    return new InputContext() {
-      @Override
-      public String getOrigin() {
-        return "";
-      }
+    return inputContext;
+  }
 
-      @Override
-      public int getRetryCount() {
-        return Integer.MAX_VALUE;
-      }
-    };
+  @Override
+  public void reclaim() {
+    // No-op
+  }
+
+  @Override
+  public int size() {
+    return 0;
+  }
+
+  @Override
+  public Iterator<ByteBuffer> iterator() {
+    return Iterators.emptyIterator();
+  }
+
+  @Override
+  public String toString() {
+    return Objects.toStringHelper(this)
+      .add("retries", retries.get())
+      .toString();
   }
 }

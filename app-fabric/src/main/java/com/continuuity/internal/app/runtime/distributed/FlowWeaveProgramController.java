@@ -3,6 +3,8 @@
  */
 package com.continuuity.internal.app.runtime.distributed;
 
+import com.continuuity.app.runtime.ProgramResourceReporter;
+import com.continuuity.internal.app.runtime.ProgramOptionConstants;
 import com.continuuity.weave.api.WeaveController;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,15 +21,19 @@ final class FlowWeaveProgramController extends AbstractWeaveProgramController {
   private static final Logger LOG = LoggerFactory.getLogger(FlowWeaveProgramController.class);
 
   private final Lock lock;
+  private final DistributedFlowletInstanceUpdater instanceUpdater;
 
-  FlowWeaveProgramController(String programName, WeaveController controller) {
-    super(programName, controller);
+  FlowWeaveProgramController(String programId, WeaveController controller,
+                             DistributedFlowletInstanceUpdater instanceUpdater,
+                             ProgramResourceReporter resourceReporter) {
+    super(programId, controller, resourceReporter);
     this.lock = new ReentrantLock();
+    this.instanceUpdater = instanceUpdater;
   }
 
   @Override
   protected void doCommand(String name, Object value) throws Exception {
-    if (!"instances".equals(name) || !(value instanceof Map)) {
+    if (!ProgramOptionConstants.INSTANCES.equals(name) || !(value instanceof Map)) {
       return;
     }
     Map<String, Integer> command = (Map<String, Integer>) value;
@@ -46,14 +52,12 @@ final class FlowWeaveProgramController extends AbstractWeaveProgramController {
   /**
    * Change the number of instances of the running flowlet. Notice that this method needs to be
    * synchronized as change of instances involves multiple steps that need to be completed all at once.
-   * @param flowletName Name of the flowlet
+   * @param flowletId Name of the flowlet
    * @param newInstanceCount New instance count
    * @throws java.util.concurrent.ExecutionException
    * @throws InterruptedException
    */
-  private synchronized void changeInstances(String flowletName, final int newInstanceCount) throws Exception {
-    weaveController.sendCommand(flowletName, ProgramCommands.SUSPEND).get();
-    weaveController.changeInstances(flowletName, newInstanceCount).get();
-    weaveController.sendCommand(flowletName, ProgramCommands.RESUME).get();
+  private synchronized void changeInstances(String flowletId, int newInstanceCount) throws Exception {
+    instanceUpdater.update(flowletId, newInstanceCount);
   }
 }

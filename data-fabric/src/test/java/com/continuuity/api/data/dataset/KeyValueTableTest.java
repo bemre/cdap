@@ -7,6 +7,7 @@ import com.continuuity.api.data.StatusCode;
 import com.continuuity.api.data.batch.Split;
 import com.continuuity.api.data.batch.SplitReader;
 import com.continuuity.data.dataset.DataSetTestBase;
+import com.continuuity.data2.transaction.TransactionContext;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import org.junit.Assert;
@@ -42,10 +43,10 @@ public class KeyValueTableTest extends DataSetTestBase {
   }
 
   @Test
-  public void testSyncWriteReadSwapDelete() throws OperationException {
+  public void testSyncWriteReadSwapDelete() throws Exception {
 
     // this test runs all operations synchronously
-    newTransaction(Mode.Sync);
+    TransactionContext txContext = newTransaction();
 
     // write a value and read it back
     kvTable.write(KEY1, VAL1);
@@ -74,49 +75,41 @@ public class KeyValueTableTest extends DataSetTestBase {
   }
 
   @Test
-  public void testASyncWriteReadSwapDelete() throws OperationException {
+  public void testASyncWriteReadSwapDelete() throws Exception {
 
     // defer all writes until commit
-    newTransaction(Mode.Batch);
+    TransactionContext txContext = newTransaction();
     // write a value
     kvTable.write(KEY2, VAL1);
-    // value should not be visible yet
-    Assert.assertNull(kvTable.read(KEY2));
     // commit the transaction
-    commitTransaction();
+    commitTransaction(txContext);
 
     // verify synchronously
-    newTransaction(Mode.Sync);
+    txContext = newTransaction();
     // verify that the value is now visible
     Assert.assertArrayEquals(VAL1, kvTable.read(KEY2));
     // commit the transaction
-    commitTransaction();
+    commitTransaction(txContext);
 
     // defer all writes until commit
-    newTransaction(Mode.Batch);
+    txContext = newTransaction();
     // update the value
     kvTable.write(KEY2, VAL2);
-    // value should not be visible yet
-    Assert.assertArrayEquals(VAL1, kvTable.read(KEY2));
     // commit the transaction
-    commitTransaction();
+    commitTransaction(txContext);
 
     // verify synchronously
-    newTransaction(Mode.Sync);
+    txContext = newTransaction();
     // verify that the value is now visible
     Assert.assertArrayEquals(VAL2, kvTable.read(KEY2));
     // commit the transaction
-    commitTransaction();
+    commitTransaction(txContext);
 
     // defer all writes until commit
-    newTransaction(Mode.Batch);
-    // write a swap, this should not fail yet
-    kvTable.swap(KEY2, VAL1, VAL3);
-    // verify that the old value is still there
-    Assert.assertArrayEquals(VAL2, kvTable.read(KEY2));
-    // attempt to commit the transaction, should fail
+    txContext = newTransaction();
     try {
-      commitTransaction();
+      // write a swap, this should fail
+      kvTable.swap(KEY2, VAL1, VAL3);
       Assert.fail("swap should have failed");
     } catch (OperationException e) {
       Assert.assertEquals(StatusCode.WRITE_CONFLICT, e.getStatus());
@@ -124,36 +117,32 @@ public class KeyValueTableTest extends DataSetTestBase {
     }
 
     // defer all writes until commit
-    newTransaction(Mode.Batch);
+    txContext = newTransaction();
     // swap the value
     kvTable.swap(KEY2, VAL2, VAL3);
-    // new value should not be visible yet
-    Assert.assertArrayEquals(VAL2, kvTable.read(KEY2));
     // commit the transaction
-    commitTransaction();
+    commitTransaction(txContext);
 
     // verify synchronously
-    newTransaction(Mode.Sync);
+    txContext = newTransaction();
     // verify the value was swapped
     Assert.assertArrayEquals(VAL3, kvTable.read(KEY2));
     // commit the transaction
-    commitTransaction();
+    commitTransaction(txContext);
 
     // defer all writes until commit
-    newTransaction(Mode.Batch);
+    txContext = newTransaction();
     // delete the value
     kvTable.delete(KEY2);
-    // value should still be visible
-    Assert.assertArrayEquals(VAL3, kvTable.read(KEY2));
     // commit the transaction
-    commitTransaction();
+    commitTransaction(txContext);
 
     // verify synchronously
-    newTransaction(Mode.Sync);
+    txContext = newTransaction();
     // verify it is gone now
     Assert.assertNull(kvTable.read(KEY2));
     // commit the transaction
-    commitTransaction();
+    commitTransaction(txContext);
   }
 
   @Test
@@ -162,47 +151,43 @@ public class KeyValueTableTest extends DataSetTestBase {
     KeyValueTable table2 = instantiator.getDataSet("t2");
 
     // write a value to table1 and verify it
-    newTransaction(Mode.Sync);
+    TransactionContext txContext = newTransaction();
     table1.write(KEY1, VAL1);
     Assert.assertArrayEquals(VAL1, table1.read(KEY1));
     table2.write(KEY2, VAL2);
     Assert.assertArrayEquals(VAL2, table2.read(KEY2));
-    commitTransaction();
+    commitTransaction(txContext);
 
     // start a new transaction
-    newTransaction(Mode.Batch);
+    txContext = newTransaction();
     // add a write for table 1 to the transaction
     table1.write(KEY1, VAL2);
-    // verify that the write is not effective yet
-    Assert.assertArrayEquals(VAL1, table1.read(KEY1));
     // submit a delete for table 2
     table2.delete(KEY2);
-    // verify that the delete is not effective yet
-    Assert.assertArrayEquals(VAL2, table2.read(KEY2));
-    // add a swap for a third table that should fail
-    kvTable.swap(KEY3, VAL1, VAL1);
 
-    // attempt to commit the transaction, should fail
     try {
-      commitTransaction();
+      // add a swap for a third table that should fail
+      kvTable.swap(KEY3, VAL1, VAL1);
       Assert.fail("swap should have failed");
     } catch (OperationException e) {
       Assert.assertEquals(StatusCode.WRITE_CONFLICT, e.getStatus());
     }
 
     // verify synchronously that old value are still there
-    newTransaction(Mode.Sync);
+    table1 = instantiator.getDataSet("t1");
+    table2 = instantiator.getDataSet("t2");
+    txContext = newTransaction();
     Assert.assertArrayEquals(VAL1, table1.read(KEY1));
     Assert.assertArrayEquals(VAL2, table2.read(KEY2));
-    commitTransaction();
+    commitTransaction(txContext);
   }
 
   @Test
-  public void testBatchReads() throws OperationException, InterruptedException {
+  public void testBatchReads() throws Exception {
     KeyValueTable t = instantiator.getDataSet("tBatch");
 
     // start a transaction
-    newTransaction(Mode.Smart);
+    TransactionContext txContext = newTransaction();
     // write 1000 random values to the table and remember them in a set
     SortedSet<Long> keysWritten = Sets.newTreeSet();
     Random rand = new Random(451);
@@ -213,10 +198,10 @@ public class KeyValueTableTest extends DataSetTestBase {
       keysWritten.add(keyLong);
     }
     // commit transaction
-    commitTransaction();
+    commitTransaction(txContext);
 
     // start a sync transaction
-    newTransaction(Mode.Sync);
+    txContext = newTransaction();
     // get the splits for the table
     List<Split> splits = t.getSplits();
     // read each split and verify the keys
@@ -224,7 +209,7 @@ public class KeyValueTableTest extends DataSetTestBase {
     verifySplits(t, splits, keysToVerify);
 
     // start a sync transaction
-    newTransaction(Mode.Sync);
+    txContext = newTransaction();
     // get specific number of splits for a subrange
     keysToVerify = Sets.newTreeSet(keysWritten.subSet(0x10000000L, 0x40000000L));
     splits = t.getSplits(5, Bytes.toBytes(0x10000000L), Bytes.toBytes(0x40000000L));

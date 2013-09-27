@@ -11,6 +11,7 @@ import com.google.common.collect.Sets;
 import org.jboss.netty.handler.codec.http.HttpMethod;
 import org.jboss.netty.handler.codec.http.HttpRequest;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
+import org.jboss.netty.handler.codec.http.QueryStringDecoder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,6 +21,8 @@ import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.net.URI;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,11 +49,6 @@ public final class HttpResourceHandler implements HttpHandler {
     //Store the handlers to call init and destroy on all handlers.
     this.handlers = ImmutableList.copyOf(handlers);
     for (HttpHandler handler : handlers){
-      if (!handler.getClass().getSuperclass().equals(Object.class)){
-        LOG.warn("{} is inherited. The annotations from base case will not be inherited",
-                 handler.getClass().getName());
-      }
-
       String basePath = "";
       if (handler.getClass().isAnnotationPresent(Path.class)){
         basePath =  handler.getClass().getAnnotation(Path.class).value();
@@ -59,7 +57,8 @@ public final class HttpResourceHandler implements HttpHandler {
       for (Method method:  handler.getClass().getDeclaredMethods()){
         if (method.getParameterTypes().length >= 2 &&
           method.getParameterTypes()[0].isAssignableFrom(HttpRequest.class) &&
-          method.getParameterTypes()[1].isAssignableFrom(HttpResponder.class)) {
+          method.getParameterTypes()[1].isAssignableFrom(HttpResponder.class) &&
+          Modifier.isPublic(method.getModifiers())) {
 
           String relativePath = "";
           if (method.getAnnotation(Path.class) != null) {
@@ -70,9 +69,8 @@ public final class HttpResourceHandler implements HttpHandler {
           Preconditions.checkArgument(httpMethods.size() >= 1,
                                       String.format("No HttpMethod found for method: %s", method.getName()));
           patternRouter.add(absolutePath, new HttpResourceModel(httpMethods, method, handler));
-
         } else {
-          LOG.warn("Not adding method {}({}) to path routing like. HTTP calls will not be routed to this method",
+          LOG.trace("Not adding method {}({}) to path routing like. HTTP calls will not be routed to this method",
                    method.getName(), method.getParameterTypes());
         }
       }
@@ -115,20 +113,27 @@ public final class HttpResourceHandler implements HttpHandler {
   public void handle(HttpRequest request, HttpResponder responder){
 
     Map<String, String> groupValues = Maps.newHashMap();
-    List<HttpResourceModel> resourceModels = patternRouter.getDestinations(request.getUri(), groupValues);
+    String path = URI.create(request.getUri()).getPath();
+
+    List<HttpResourceModel> resourceModels = patternRouter.getDestinations(path, groupValues);
 
     HttpResourceModel httpResourceModel = getMatchedResourceModel(resourceModels, request.getMethod());
-
-    if (httpResourceModel != null){
-      //Found a httpresource route to it.
-      httpResourceModel.handle(request, responder, groupValues);
-    } else if (resourceModels.size() > 0)  {
-      //Found a matching resource but could not find the right HttpMethod so return 405
-      responder.sendError(HttpResponseStatus.METHOD_NOT_ALLOWED,
-                          String.format("Problem accessing: %s. Reason: Method Not Allowed", request.getUri()));
-    } else {
-      responder.sendError(HttpResponseStatus.NOT_FOUND, String.format("Problem accessing: %s. Reason: Not Found",
-                                                                      request.getUri()));
+    try {
+      if (httpResourceModel != null){
+        //Found a httpresource route to it.
+        httpResourceModel.handle(request, responder, groupValues);
+      } else if (resourceModels.size() > 0)  {
+        //Found a matching resource but could not find the right HttpMethod so return 405
+        responder.sendError(HttpResponseStatus.METHOD_NOT_ALLOWED,
+                            String.format("Problem accessing: %s. Reason: Method Not Allowed", request.getUri()));
+      } else {
+        responder.sendError(HttpResponseStatus.NOT_FOUND, String.format("Problem accessing: %s. Reason: Not Found",
+                                                                        request.getUri()));
+      }
+    } catch (Throwable t){
+      responder.sendError(HttpResponseStatus.INTERNAL_SERVER_ERROR,
+                          String.format("Caught exception processing request. Reason: %s",
+                                         t.getMessage()));
     }
   }
 

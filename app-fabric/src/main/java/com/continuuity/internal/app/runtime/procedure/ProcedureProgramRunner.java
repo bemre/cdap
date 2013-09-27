@@ -1,6 +1,7 @@
 package com.continuuity.internal.app.runtime.procedure;
 
 import com.continuuity.api.ApplicationSpecification;
+import com.continuuity.api.ResourceSpecification;
 import com.continuuity.api.data.DataSet;
 import com.continuuity.api.procedure.ProcedureSpecification;
 import com.continuuity.app.program.Program;
@@ -8,6 +9,7 @@ import com.continuuity.app.program.Type;
 import com.continuuity.app.runtime.Arguments;
 import com.continuuity.app.runtime.ProgramController;
 import com.continuuity.app.runtime.ProgramOptions;
+import com.continuuity.app.runtime.ProgramResourceReporter;
 import com.continuuity.app.runtime.ProgramRunner;
 import com.continuuity.common.conf.Constants;
 import com.continuuity.common.logging.common.LogWriter;
@@ -15,7 +17,9 @@ import com.continuuity.common.logging.logback.CAppender;
 import com.continuuity.common.metrics.MetricsCollectionService;
 import com.continuuity.common.metrics.MetricsCollector;
 import com.continuuity.internal.app.runtime.AbstractProgramController;
+import com.continuuity.internal.app.runtime.AbstractResourceReporter;
 import com.continuuity.internal.app.runtime.DataFabricFacadeFactory;
+import com.continuuity.internal.app.runtime.ProgramOptionConstants;
 import com.continuuity.weave.api.RunId;
 import com.continuuity.weave.api.ServiceAnnouncer;
 import com.continuuity.weave.common.Cancellable;
@@ -74,7 +78,7 @@ public final class ProcedureProgramRunner implements ProgramRunner {
   @Inject
   public ProcedureProgramRunner(DataFabricFacadeFactory txAgentSupplierFactory,
                                 ServiceAnnouncer serviceAnnouncer,
-                                @Named(Constants.CFG_APP_FABRIC_SERVER_ADDRESS) InetAddress hostname,
+                                @Named(Constants.AppFabric.SERVER_ADDRESS) InetAddress hostname,
                                 MetricsCollectionService metricsCollectionService) {
     this.txAgentSupplierFactory = txAgentSupplierFactory;
     this.serviceAnnouncer = serviceAnnouncer;
@@ -101,14 +105,14 @@ public final class ProcedureProgramRunner implements ProgramRunner {
       ApplicationSpecification appSpec = program.getSpecification();
       Preconditions.checkNotNull(appSpec, "Missing application specification.");
 
-      Type processorType = program.getProcessorType();
+      Type processorType = program.getType();
       Preconditions.checkNotNull(processorType, "Missing processor type.");
       Preconditions.checkArgument(processorType == Type.PROCEDURE, "Only PROCEDURE process type is supported.");
 
-      ProcedureSpecification procedureSpec = appSpec.getProcedures().get(program.getProgramName());
-      Preconditions.checkNotNull(procedureSpec, "Missing ProcedureSpecification for %s", program.getProgramName());
+      ProcedureSpecification procedureSpec = appSpec.getProcedures().get(program.getName());
+      Preconditions.checkNotNull(procedureSpec, "Missing ProcedureSpecification for %s", program.getName());
 
-      int instanceId = Integer.parseInt(options.getArguments().getOption("instanceId", "0"));
+      int instanceId = Integer.parseInt(options.getArguments().getOption(ProgramOptionConstants.INSTANCE_ID, "0"));
 
       RunId runId = RunIds.generate();
 
@@ -134,11 +138,14 @@ public final class ProcedureProgramRunner implements ProgramRunner {
       channelGroup.add(serverChannel);
 
       LOG.info(String.format("Procedure server started for %s.%s listening on %s",
-                             program.getApplicationId(), program.getProgramName(), serverChannel.getLocalAddress()));
+                             program.getApplicationId(), program.getName(), serverChannel.getLocalAddress()));
 
+      ProgramResourceReporter resourceReporter =
+        new ProcedureResourceReporter(program, procedureContext.getSpecification());
       int servicePort = ((InetSocketAddress) serverChannel.getLocalAddress()).getPort();
       return new ProcedureProgramController(program, runId,
-                                            serviceAnnouncer.announce(getServiceName(program), servicePort));
+                                            serviceAnnouncer.announce(getServiceName(program), servicePort),
+                                            resourceReporter);
     } catch (Exception e) {
       throw Throwables.propagate(e);
     }
@@ -152,7 +159,7 @@ public final class ProcedureProgramRunner implements ProgramRunner {
     Executor bossExecutor = Executors.newSingleThreadExecutor(
       new ThreadFactoryBuilder()
         .setDaemon(true)
-        .setNameFormat("procedure-boss-" + program.getProgramName() + "-%d")
+        .setNameFormat("procedure-boss-" + program.getName() + "-%d")
         .build());
 
     // Worker threads pool
@@ -195,16 +202,20 @@ public final class ProcedureProgramRunner implements ProgramRunner {
 
   private String getServiceName(Program program) {
     return String.format("procedure.%s.%s.%s",
-                         program.getAccountId(), program.getApplicationId(), program.getProgramName());
+                         program.getAccountId(), program.getApplicationId(), program.getName());
   }
 
   private final class ProcedureProgramController extends AbstractProgramController {
 
     private final Cancellable cancellable;
+    private final ProgramResourceReporter resourceReporter;
 
-    ProcedureProgramController(Program program, RunId runId, Cancellable cancellable) {
-      super(program.getProgramName(), runId);
+    ProcedureProgramController(Program program, RunId runId, Cancellable cancellable,
+                               ProgramResourceReporter resourceReporter) {
+      super(program.getName(), runId);
       this.cancellable = cancellable;
+      this.resourceReporter = resourceReporter;
+      this.resourceReporter.start();
       started();
     }
 
@@ -221,6 +232,7 @@ public final class ProcedureProgramRunner implements ProgramRunner {
     @Override
     protected void doStop() throws Exception {
       LOG.info("Stopping procedure: " + procedureContext);
+      resourceReporter.stop();
       cancellable.cancel();
       try {
         if (!channelGroup.close().await(CLOSE_CHANNEL_TIMEOUT, TimeUnit.SECONDS)) {
@@ -238,6 +250,30 @@ public final class ProcedureProgramRunner implements ProgramRunner {
     @Override
     protected void doCommand(String name, Object value) throws Exception {
       // No-op
+    }
+  }
+
+  /**
+   * Writes what the procedure spec has for resources. Doesn't reflect reality when reactor is being
+   * run locally, but gives an approximation of what resource usage would look like in distributed mode.
+   */
+  private class ProcedureResourceReporter extends AbstractResourceReporter {
+    private final ResourceSpecification resources;
+    private final String procedureId;
+    private static final int DEFAULT_MEMORY_USAGE = 512;
+    private static final int DEFAULT_VCORE_USAGE = 1;
+
+    ProcedureResourceReporter(Program program, ProcedureSpecification procedureSpec) {
+      super(program, metricsCollectionService);
+      this.resources = procedureSpec.getResources();
+      this.procedureId = program.getName();
+    }
+
+    @Override
+    public void reportResources() {
+      sendMetrics(metricContextBase + "." + procedureId, 1, resources.getMemoryMB(), resources.getVirtualCores());
+      // plus one for the 'application master'
+      sendAppMasterMetrics(DEFAULT_MEMORY_USAGE, DEFAULT_VCORE_USAGE);
     }
   }
 }

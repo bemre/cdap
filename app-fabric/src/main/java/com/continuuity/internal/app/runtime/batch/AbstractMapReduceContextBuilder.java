@@ -1,7 +1,7 @@
 package com.continuuity.internal.app.runtime.batch;
 
 import com.continuuity.api.batch.MapReduceSpecification;
-import com.continuuity.api.data.OperationException;
+import com.continuuity.api.data.DataSet;
 import com.continuuity.api.data.batch.BatchReadable;
 import com.continuuity.api.data.batch.BatchWritable;
 import com.continuuity.api.data.batch.Split;
@@ -11,14 +11,11 @@ import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.logging.common.LogWriter;
 import com.continuuity.common.logging.logback.CAppender;
 import com.continuuity.data.DataFabric;
-import com.continuuity.data.DataFabricImpl;
+import com.continuuity.data.DataFabric2Impl;
+import com.continuuity.data.DataSetAccessor;
 import com.continuuity.data.dataset.DataSetInstantiator;
-import com.continuuity.data.operation.OperationContext;
-import com.continuuity.data.operation.executor.DetachedSmartTransactionAgent;
-import com.continuuity.data.operation.executor.OperationExecutor;
-import com.continuuity.data.operation.executor.Transaction;
-import com.continuuity.data.operation.executor.TransactionAgent;
-import com.continuuity.data.operation.executor.TransactionProxy;
+import com.continuuity.data2.transaction.Transaction;
+import com.continuuity.data2.transaction.TransactionAware;
 import com.continuuity.internal.app.runtime.DataSets;
 import com.continuuity.logging.appender.LogAppenderInitializer;
 import com.continuuity.weave.filesystem.LocationFactory;
@@ -32,7 +29,9 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.io.IOException;
+import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Builds the {@link BasicMapReduceContext}.
@@ -47,6 +46,7 @@ public abstract class AbstractMapReduceContextBuilder {
    * Build the instance of {@link BasicMapReduceContext}.
    * @param conf runtime configuration
    * @param runId program run id
+   * @param logicalStartTime The logical start time of the job.
    * @param tx transaction to use
    * @param classLoader classloader to use
    * @param programLocation program location
@@ -56,10 +56,11 @@ public abstract class AbstractMapReduceContextBuilder {
    * @return instance of {@link BasicMapReduceContext}
    */
   public BasicMapReduceContext build(CConfiguration conf, String runId,
+                                     long logicalStartTime,
                                      Arguments runtimeArguments,
                                      Transaction tx,
                                      ClassLoader classLoader,
-                                     String programLocation,
+                                     URI programLocation,
                                      @Nullable String inputDataSetName,
                                      @Nullable List<Split> inputSplits,
                                      @Nullable String outputDataSetName) {
@@ -76,34 +77,34 @@ public abstract class AbstractMapReduceContextBuilder {
     }
 
     // Initializing dataset context and hooking it up with mapreduce job transaction
-    OperationExecutor opex = injector.getInstance(OperationExecutor.class);
-    OperationContext opexContext = new OperationContext(program.getAccountId(), program.getApplicationId());
 
-    TransactionProxy transactionProxy = new TransactionProxy();
-    TransactionAgent txAgent = new DetachedSmartTransactionAgent(opex, opexContext, tx);
-    try {
-      txAgent.start();
-    } catch (OperationException e) {
-      LOG.error("Failed to start transaction agent for job (trying to attach to existing tx): " +
-                  program.getProgramName());
-      throw Throwables.propagate(e);
-    }
-    transactionProxy.setTransactionAgent(txAgent);
-    DataFabric dataFabric = new DataFabricImpl(opex, locationFactory, opexContext);
+    DataSetAccessor dataSetAccessor = injector.getInstance(DataSetAccessor.class);
+
+    DataFabric dataFabric = new DataFabric2Impl(locationFactory, dataSetAccessor);
     DataSetInstantiator dataSetContext =
-      new DataSetInstantiator(dataFabric, transactionProxy, classLoader);
+      new DataSetInstantiator(dataFabric, classLoader);
     dataSetContext.setDataSets(Lists.newArrayList(program.getSpecification().getDataSets().values()));
 
+    // creating dataset instances earlier so that we can pass them to txAgent
+    // NOTE: we are initializing all datasets of application, so that user is not required
+    //       to define all datasets used in Mapper and Reducer classes on MapReduceJob
+    //       class level
+    Map<String, DataSet> dataSets = DataSets.createDataSets(
+      dataSetContext, program.getSpecification().getDataSets().keySet());
+
     // Creating mapreduce job context
-    MapReduceSpecification spec = program.getSpecification().getMapReduces().get(program.getProgramName());
+    MapReduceSpecification spec = program.getSpecification().getMapReduces().get(program.getName());
     BasicMapReduceContext context =
-      new BasicMapReduceContext(program, RunIds.fromString(runId), runtimeArguments, txAgent,
-                                // NOTE: we are initializing all datasets of application, so that user is not required
-                                //       to define all datasets used in Mapper and Reducer classes on MapReduceJob
-                                //       class level
-                                DataSets.createDataSets(
-                                  dataSetContext, program.getSpecification().getDataSets().keySet()),
-                                spec);
+
+      new BasicMapReduceContext(program, RunIds.fromString(runId),
+                                runtimeArguments, dataSets, spec,
+                                dataSetContext.getTransactionAware(), logicalStartTime);
+
+    // propagating tx to all txAware guys
+    // NOTE: tx will be committed by client code
+    for (TransactionAware txAware : dataSetContext.getTransactionAware()) {
+      txAware.startTx(tx);
+    }
 
     // Setting extra context's configuration: mapreduce input and output
     if (inputDataSetName != null && inputSplits != null) {
@@ -113,12 +114,6 @@ public abstract class AbstractMapReduceContextBuilder {
       context.setOutput((BatchWritable) context.getDataSet(outputDataSetName));
     }
 
-    // Hooking up with logging and metrics systems
-    // this is a hack for old logging system
-    if (injector.getBindings().containsKey(Key.get(LogWriter.class))) {
-      CAppender.logWriter = injector.getInstance(LogWriter.class);
-    }
-
     // Initialize log appender
     LogAppenderInitializer logAppenderInitializer = injector.getInstance(LogAppenderInitializer.class);
     logAppenderInitializer.initialize();
@@ -126,7 +121,7 @@ public abstract class AbstractMapReduceContextBuilder {
     return context;
   }
 
-  protected abstract Program loadProgram(String programLocation, LocationFactory locationFactory) throws IOException;
+  protected abstract Program loadProgram(URI programLocation, LocationFactory locationFactory) throws IOException;
 
   /**
    * @return instance of {@link Injector} with bindings for current runtime environment

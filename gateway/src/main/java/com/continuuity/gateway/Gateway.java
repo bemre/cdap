@@ -5,8 +5,10 @@ import com.continuuity.app.store.StoreFactory;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.service.Server;
 import com.continuuity.common.service.ServerException;
+import com.continuuity.data.DataSetAccessor;
 import com.continuuity.data.metadata.MetaDataStore;
 import com.continuuity.data.operation.executor.OperationExecutor;
+import com.continuuity.data2.transaction.TransactionSystemClient;
 import com.continuuity.gateway.auth.GatewayAuthenticator;
 import com.continuuity.gateway.auth.NoAuthenticator;
 import com.continuuity.gateway.auth.PassportVPCAuthenticator;
@@ -68,6 +70,14 @@ public class Gateway implements Server {
    */
   @Inject
   private LocationFactory locationFactory;
+
+  // to support early integration with TxDs2
+  @Inject
+  private DataSetAccessor dataSetAccessor;
+
+  // to support early integration with TxDs2
+  @Inject
+  private TransactionSystemClient txSystemClient;
 
   /**
    * This is the executor that all accessors will use for the data fabric.
@@ -212,8 +222,11 @@ public class Gateway implements Server {
         ((StoreAware) connector).setStore(this.store);
       }
       if (connector instanceof DataAccessor) {
-        ((DataAccessor) connector).setExecutor(this.executor);
-        ((DataAccessor) connector).setLocationFactory(this.locationFactory);
+        DataAccessor dataAccessor = (DataAccessor) connector;
+        dataAccessor.setExecutor(this.executor);
+        dataAccessor.setLocationFactory(this.locationFactory);
+        dataAccessor.setDataSetAccessor(this.dataSetAccessor);
+        dataAccessor.setTxSystemClient(this.txSystemClient);
       }
       if (connector instanceof LogReaderAware) {
         ((LogReaderAware) connector).setLogReader(logReader);
@@ -297,12 +310,25 @@ public class Gateway implements Server {
     LOG.info("Setting Operations Executor to " +
                executor.getClass().getName() + ".");
     this.executor = executor;
-    this.mds = new MetadataService(executor);
+  }
+
+  public void setMetaDataStore(MetaDataStore store) {
+    this.metaDataStore = store;
   }
 
   public void setDiscoveryServiceClient(
     DiscoveryServiceClient discoveryServiceClient) {
     this.discoveryServiceClient = discoveryServiceClient;
+  }
+
+  // to be used by unit-tests only
+  void setDataSetAccessor(DataSetAccessor dataSetAccessor) {
+    this.dataSetAccessor = dataSetAccessor;
+  }
+
+  // to be used by unit-tests only
+  void setTxSystemClient(TransactionSystemClient txSystemClient) {
+    this.txSystemClient = txSystemClient;
   }
 
   /**
@@ -319,7 +345,7 @@ public class Gateway implements Server {
     LOG.info("Configuring Gateway..");
 
     if (this.mds == null) {
-      this.mds = new MetadataService(executor);
+      this.mds = new MetadataService(this.metaDataStore);
     }
 
     if (storeFactory != null) {

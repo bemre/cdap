@@ -3,7 +3,9 @@
  */
 package com.continuuity.metrics.query;
 
+import com.continuuity.api.data.OperationException;
 import com.continuuity.common.http.core.AbstractHttpHandler;
+import com.continuuity.common.http.core.HandlerContext;
 import com.continuuity.common.http.core.HttpResponder;
 import com.continuuity.common.metrics.MetricsScope;
 import com.continuuity.common.queue.QueueName;
@@ -28,6 +30,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import com.google.common.collect.PeekingIterator;
 import com.google.common.collect.Sets;
 import com.google.common.reflect.TypeToken;
@@ -52,6 +55,7 @@ import java.io.Reader;
 import java.net.URI;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -78,22 +82,40 @@ public final class BatchMetricsHandler extends AbstractHttpHandler {
   };
 
   // It's a cache from metric table resolution to MetricsTable
-  private final LoadingCache<Integer, TimeSeriesTable> metricsTableCache;
-  private final AggregatesTable aggregatesTable;
+  private final Map<MetricsScope, LoadingCache<Integer, TimeSeriesTable>> metricsTableCaches;
+  private final Map<MetricsScope, AggregatesTable> aggregatesTables;
 
   @Inject
   public BatchMetricsHandler(final MetricsTableFactory metricsTableFactory) {
-    this.metricsTableCache = CacheBuilder.newBuilder().build(new CacheLoader<Integer, TimeSeriesTable>() {
-      @Override
-      public TimeSeriesTable load(Integer key) throws Exception {
-        return metricsTableFactory.createTimeSeries(MetricsScope.REACTOR.name(), key);
-      }
-    });
-    this.aggregatesTable = metricsTableFactory.createAggregates(MetricsScope.REACTOR.name());
+    this.metricsTableCaches = Maps.newHashMap();
+    this.aggregatesTables = Maps.newHashMap();
+    for (final MetricsScope scope : MetricsScope.values()) {
+      LoadingCache<Integer, TimeSeriesTable> cache =
+        CacheBuilder.newBuilder().build(new CacheLoader<Integer, TimeSeriesTable>() {
+          @Override
+          public TimeSeriesTable load(Integer key) throws Exception {
+            return metricsTableFactory.createTimeSeries(scope.name(), key);
+          }
+        });
+      this.metricsTableCaches.put(scope, cache);
+      this.aggregatesTables.put(scope, metricsTableFactory.createAggregates(scope.name()));
+    }
+  }
+
+  @Override
+  public void init(HandlerContext context) {
+    super.init(context);
+    LOG.info("Starting BatchMetricsHandler");
+  }
+
+  @Override
+  public void destroy(HandlerContext context) {
+    super.destroy(context);
+    LOG.info("Stopping BatchMetricsHandler");
   }
 
   @POST
-  public void handleBatch(HttpRequest request, HttpResponder responder) throws IOException {
+  public void handleBatch(HttpRequest request, HttpResponder responder) throws IOException, OperationException {
     if (!CONTENT_TYPE_JSON.equals(request.getHeader(HttpHeaders.Names.CONTENT_TYPE))) {
       responder.sendError(HttpResponseStatus.UNSUPPORTED_MEDIA_TYPE, "Only " + CONTENT_TYPE_JSON + " is supported.");
       return;
@@ -124,7 +146,8 @@ public final class BatchMetricsHandler extends AbstractHttpHandler {
             .setTag(metricsRequest.getTagPrefix())
             .build(metricsRequest.getStartTime(), metricsRequest.getEndTime());
 
-          PeekingIterator<TimeValue> timeValueItor = Iterators.peekingIterator(queryTimeSeries(scanQuery));
+          PeekingIterator<TimeValue> timeValueItor = Iterators.peekingIterator(
+            queryTimeSeries(metricsRequest.getScope(), scanQuery));
 
           for (int i = 0; i < metricsRequest.getCount(); i++) {
             long resultTime = metricsRequest.getStartTime() + i;
@@ -158,20 +181,22 @@ public final class BatchMetricsHandler extends AbstractHttpHandler {
     responder.sendJson(HttpResponseStatus.OK, output);
   }
 
-  private void computeProcessBusyness(MetricsRequest metricsRequest, TimeSeriesResponse.Builder builder) {
+  private void computeProcessBusyness(MetricsRequest metricsRequest, TimeSeriesResponse.Builder builder)
+    throws OperationException {
     MetricsScanQuery scanQuery = new MetricsScanQueryBuilder()
       .setContext(metricsRequest.getContextPrefix())
       .setMetric("process.tuples.read")
       .build(metricsRequest.getStartTime(), metricsRequest.getEndTime());
+    MetricsScope scope = metricsRequest.getScope();
 
-    PeekingIterator<TimeValue> tuplesReadItor = Iterators.peekingIterator(queryTimeSeries(scanQuery));
+    PeekingIterator<TimeValue> tuplesReadItor = Iterators.peekingIterator(queryTimeSeries(scope, scanQuery));
 
     scanQuery = new MetricsScanQueryBuilder()
       .setContext(metricsRequest.getContextPrefix())
       .setMetric("process.events.processed")
       .build(metricsRequest.getStartTime(), metricsRequest.getEndTime());
 
-    PeekingIterator<TimeValue> eventsProcessedItor = Iterators.peekingIterator(queryTimeSeries(scanQuery));
+    PeekingIterator<TimeValue> eventsProcessedItor = Iterators.peekingIterator(queryTimeSeries(scope, scanQuery));
 
     for (int i = 0; i < metricsRequest.getCount(); i++) {
       long resultTime = metricsRequest.getStartTime() + i;
@@ -193,6 +218,8 @@ public final class BatchMetricsHandler extends AbstractHttpHandler {
   }
 
   private Object computeQueueLength(MetricsRequest metricsRequest) {
+    MetricsScope scope = metricsRequest.getScope();
+    AggregatesTable aggregatesTable = aggregatesTables.get(scope);
     // First scan the ack to get an aggregate and also names of queues.
     AggregatesScanner scanner = aggregatesTable.scan(metricsRequest.getContextPrefix(),
                                                      "q.ack",
@@ -229,9 +256,10 @@ public final class BatchMetricsHandler extends AbstractHttpHandler {
     return new AggregateResponse(len >= 0 ? len : 0);
   }
 
-  private Iterator<TimeValue> queryTimeSeries(MetricsScanQuery scanQuery) {
+  private Iterator<TimeValue> queryTimeSeries(MetricsScope scope, MetricsScanQuery scanQuery)
+    throws OperationException {
     List<Iterable<TimeValue>> timeValues = Lists.newArrayList();
-    MetricsScanner scanner = metricsTableCache.getUnchecked(1).scan(scanQuery);
+    MetricsScanner scanner = metricsTableCaches.get(scope).getUnchecked(1).scan(scanQuery);
     while (scanner.hasNext()) {
       timeValues.add(scanner.next());
     }
@@ -256,6 +284,7 @@ public final class BatchMetricsHandler extends AbstractHttpHandler {
   }
 
   private AggregateResponse getAggregates(MetricsRequest request) {
+    AggregatesTable aggregatesTable = aggregatesTables.get(request.getScope());
     AggregatesScanner scanner = aggregatesTable.scan(request.getContextPrefix(), request.getMetricPrefix(),
                                                      request.getRunId(), request.getTagPrefix());
     return new AggregateResponse(sumAll(scanner));

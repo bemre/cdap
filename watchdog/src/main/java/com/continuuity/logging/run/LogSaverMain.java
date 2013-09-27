@@ -6,6 +6,8 @@ package com.continuuity.logging.run;
 
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.conf.Constants;
+import com.continuuity.common.guice.ConfigModule;
+import com.continuuity.common.guice.LocationRuntimeModule;
 import com.continuuity.common.runtime.DaemonMain;
 import com.continuuity.logging.LoggingConfiguration;
 import com.continuuity.logging.serialize.LogSchema;
@@ -15,6 +17,8 @@ import com.continuuity.weave.api.WeaveRunner;
 import com.continuuity.weave.api.WeaveRunnerService;
 import com.continuuity.weave.api.logging.PrinterLogHandler;
 import com.continuuity.weave.common.ServiceListenerAdapter;
+import com.continuuity.weave.filesystem.LocationFactories;
+import com.continuuity.weave.filesystem.LocationFactory;
 import com.continuuity.weave.yarn.YarnWeaveRunnerService;
 import com.google.common.base.Charsets;
 import com.google.common.base.Preconditions;
@@ -22,7 +26,13 @@ import com.google.common.base.Throwables;
 import com.google.common.io.Files;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.Service;
+import com.google.inject.AbstractModule;
+import com.google.inject.Guice;
+import com.google.inject.Injector;
+import com.google.inject.Provides;
+import com.google.inject.Singleton;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +54,7 @@ public final class LogSaverMain extends DaemonMain {
 
   private Configuration hConf;
   private CConfiguration cConf;
+  private String yarnUser;
 
   public static void main(String [] args) throws Exception {
     new LogSaverMain().doMain(args);
@@ -51,10 +62,34 @@ public final class LogSaverMain extends DaemonMain {
 
   @Override
   public void init(String[] args) {
-    hConf = new Configuration();
+    hConf = HBaseConfiguration.create();
     cConf = CConfiguration.create();
-    weaveRunnerService = new YarnWeaveRunnerService(new YarnConfiguration(),
-                                                    cConf.get(Constants.CFG_ZOOKEEPER_ENSEMBLE));
+
+    Injector injector = Guice.createInjector(
+      new ConfigModule(cConf, hConf),
+      new LocationRuntimeModule().getDistributedModules(),
+      new AbstractModule() {
+        @Override
+        protected void configure() {
+          bind(WeaveRunnerService.class).to(YarnWeaveRunnerService.class);
+          bind(WeaveRunner.class).to(WeaveRunnerService.class);
+        }
+
+        @Singleton
+        @Provides
+        private YarnWeaveRunnerService provideYarnWeaveRunnerService(CConfiguration configuration,
+                                                                     YarnConfiguration yarnConfiguration,
+                                                                     LocationFactory locationFactory) {
+          String zkNamespace = configuration.get(Constants.CFG_WEAVE_ZK_NAMESPACE, "/weave");
+          return new YarnWeaveRunnerService(yarnConfiguration,
+                                            configuration.get(Constants.Zookeeper.QUORUM) + zkNamespace,
+                                            LocationFactories.namespace(locationFactory, "weave"));
+        }
+      }
+    );
+
+    weaveRunnerService = injector.getInstance(WeaveRunnerService.class);
+    yarnUser = cConf.get(Constants.CFG_YARN_USER, System.getProperty("user.name"));
   }
 
   @Override
@@ -110,9 +145,11 @@ public final class LogSaverMain extends DaemonMain {
     }
   }
 
-  static WeavePreparer doInit(WeaveRunner weaveRunner, Configuration hConf, CConfiguration cConf) {
-    int partitions = cConf.getInt(LoggingConfiguration.NUM_PARTITIONS,  -1);
-    Preconditions.checkArgument(partitions > 0, "log.publish.partitions should be at least 1, got %s", partitions);
+  private WeavePreparer doInit(WeaveRunner weaveRunner, Configuration hConf, CConfiguration cConf) {
+    int numInstances = cConf.getInt(LoggingConfiguration.LOG_SAVER_NUM_INSTANCES,
+                                    LoggingConfiguration.DEFAULT_LOG_SAVER_NUM_INSTANCES);
+    Preconditions.checkArgument(numInstances > 0, "log saver num instances should be at least 1, got %s",
+                                numInstances);
 
     int memory = cConf.getInt(LoggingConfiguration.LOG_SAVER_RUN_MEMORY_MB, 1024);
     Preconditions.checkArgument(memory > 0, "Got invalid memory value for log saver %s", memory);
@@ -125,7 +162,8 @@ public final class LogSaverMain extends DaemonMain {
       cConfFile = saveCConf(cConf, File.createTempFile("cConf", ".xml"));
       cConfFile.deleteOnExit();
 
-      return weaveRunner.prepare(new LogSaverWeaveApplication(partitions, memory, hConfFile, cConfFile))
+      return weaveRunner.prepare(new LogSaverWeaveApplication(numInstances, memory, hConfFile, cConfFile))
+        .setUser(yarnUser)
         .addLogHandler(new PrinterLogHandler(new PrintWriter(System.out)))
         .withResources(LogSchema.getSchemaURL().toURI());
     } catch (Exception e) {

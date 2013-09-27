@@ -5,13 +5,10 @@ import com.continuuity.api.data.batch.SimpleSplit;
 import com.continuuity.api.data.batch.Split;
 import com.continuuity.app.runtime.Arguments;
 import com.continuuity.common.conf.CConfiguration;
-import com.continuuity.data.operation.executor.ReadPointer;
-import com.continuuity.data.operation.executor.Transaction;
-import com.continuuity.data.operation.executor.omid.memory.MemoryReadPointer;
+import com.continuuity.data2.transaction.Transaction;
 import com.continuuity.internal.app.runtime.BasicArguments;
 import com.continuuity.internal.app.runtime.batch.distributed.DistributedMapReduceContextBuilder;
 import com.continuuity.internal.app.runtime.batch.inmemory.InMemoryMapReduceContextBuilder;
-import com.esotericsoftware.minlog.Log;
 import com.google.common.base.Throwables;
 import com.google.gson.Gson;
 import org.apache.hadoop.fs.Path;
@@ -26,10 +23,9 @@ import java.io.IOException;
 import java.io.StringWriter;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
+import java.net.URI;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Provides access to MapReduceContext for mapreduce job tasks.
@@ -39,6 +35,7 @@ public final class MapReduceContextProvider {
   private static final Logger LOG = LoggerFactory.getLogger(MapReduceContextProvider.class);
 
   private static final String HCONF_ATTR_RUN_ID = "hconf.program.run.id";
+  private static final String HCONF_ATTR_LOGICAL_START_TIME = "hconf.program.logical.start.time";
   private static final String HCONF_ATTR_ARGS = "hconf.program.args";
   private static final String HCONF_ATTR_PROGRAM_JAR_NAME = "hconf.program.jar.name";
   private static final String HCONF_ATTR_CCONF = "hconf.cconf";
@@ -47,10 +44,7 @@ public final class MapReduceContextProvider {
   private static final String HCONF_ATTR_INPUT_SPLITS = "hconf.program.input.splits";
   private static final String HCONF_ATTR_OUTPUT_DATASET = "hconf.program.output.dataset";
 
-  private static final String HCONF_ATTR_TX_WRITE_VERSION = "hconf.program.tx.write_version";
-  private static final String HCONF_ATTR_TX_READ_POINTER_WRITE_POINT = "hconf.program.tx.read_pointer.write";
-  private static final String HCONF_ATTR_TX_READ_POINTER_READ_POINT = "hconf.program.tx.read_pointer.read";
-  private static final String HCONF_ATTR_TX_READ_POINTER_EXCLUDES = "hconf.program.tx.read_pointer.excludes";
+  private static final String HCONF_ATTR_NEW_TX = "hconf.program.newtx.tx";
 
   private final JobContext jobContext;
   private AbstractMapReduceContextBuilder contextBuilder;
@@ -67,6 +61,7 @@ public final class MapReduceContextProvider {
       context = getBuilder(conf)
         .build(conf,
                getRunId(),
+               getLogicalStartTime(),
                getAruments(),
                getTx(),
                jobContext.getConfiguration().getClassLoader(),
@@ -78,8 +73,10 @@ public final class MapReduceContextProvider {
     return context;
   }
 
-  public void set(BasicMapReduceContext context, CConfiguration conf, Transaction tx, String programJarName) {
+  public void set(BasicMapReduceContext context, CConfiguration conf,
+                  Transaction tx, String programJarName) {
     setRunId(context.getRunId().getId());
+    setLogicalStartTime(context.getLogicalStartTime());
     setArguments(context.getRuntimeArgs());
     setProgramJarName(programJarName);
     setConf(conf);
@@ -103,11 +100,11 @@ public final class MapReduceContextProvider {
     return new Gson().fromJson(jobContext.getConfiguration().get(HCONF_ATTR_ARGS), BasicArguments.class);
   }
 
-  private String getProgramLocation() {
+  private URI getProgramLocation() {
     String programJarName = getProgramJarName();
     for (Path file : jobContext.getFileClassPaths()) {
       if (programJarName.equals(file.getName())) {
-        return file.toUri().getPath();
+        return file.toUri();
       }
     }
     throw new IllegalStateException("Program jar " + programJarName + " not found in classpath files.");
@@ -119,6 +116,14 @@ public final class MapReduceContextProvider {
 
   private String getRunId() {
     return jobContext.getConfiguration().get(HCONF_ATTR_RUN_ID);
+  }
+
+  private void setLogicalStartTime(long startTime) {
+    jobContext.getConfiguration().setLong(HCONF_ATTR_LOGICAL_START_TIME, startTime);
+  }
+
+  private long getLogicalStartTime() {
+    return jobContext.getConfiguration().getLong(HCONF_ATTR_LOGICAL_START_TIME, System.currentTimeMillis());
   }
 
   private void setProgramJarName(String programJarName) {
@@ -222,32 +227,11 @@ public final class MapReduceContextProvider {
   }
 
   private void setTx(Transaction tx) {
-    ReadPointer readPointer = tx.getReadPointer();
-    if (!(readPointer instanceof MemoryReadPointer)) {
-      String message = String.format("Unsupported readPointer implementation %s, only MemoryReadPointer is supported",
-                                     readPointer.getClass().getName());
-      Log.error(message);
-      throw new IllegalArgumentException(message);
-
-    }
-    jobContext.getConfiguration().setLong(HCONF_ATTR_TX_WRITE_VERSION, tx.getWriteVersion());
-    jobContext.getConfiguration().setLong(HCONF_ATTR_TX_READ_POINTER_WRITE_POINT,
-                                          ((MemoryReadPointer) readPointer).getWriteVersion());
-    jobContext.getConfiguration().setLong(HCONF_ATTR_TX_READ_POINTER_READ_POINT,
-                                          ((MemoryReadPointer) readPointer).getReadPointer());
-    jobContext.getConfiguration().set(HCONF_ATTR_TX_READ_POINTER_EXCLUDES,
-                                      new Gson().toJson(((MemoryReadPointer) readPointer).getReadExcludes()));
+    jobContext.getConfiguration().set(HCONF_ATTR_NEW_TX, tx.toJson());
   }
 
   private Transaction getTx() {
-    long writeVersion = Long.valueOf(jobContext.getConfiguration().get(HCONF_ATTR_TX_WRITE_VERSION));
-    long writePoint = Long.valueOf(jobContext.getConfiguration().get(HCONF_ATTR_TX_READ_POINTER_WRITE_POINT));
-    long readPoint = Long.valueOf(jobContext.getConfiguration().get(HCONF_ATTR_TX_READ_POINTER_READ_POINT));
-    @SuppressWarnings("unchecked")
-    Set<Long> excludes = new Gson().fromJson(jobContext.getConfiguration().get(HCONF_ATTR_TX_READ_POINTER_EXCLUDES),
-                                             HashSet.class);
-    // we want long-running transaction which doesn't track changes
-    return new Transaction(writeVersion, new MemoryReadPointer(readPoint, writePoint, excludes), false);
+    return Transaction.fromJson(jobContext.getConfiguration().get(HCONF_ATTR_NEW_TX));
   }
 
   private synchronized AbstractMapReduceContextBuilder getBuilder(CConfiguration conf) {

@@ -6,26 +6,23 @@ package com.continuuity.test.internal;
 
 import com.continuuity.api.Application;
 import com.continuuity.api.ApplicationSpecification;
-import com.continuuity.api.flow.FlowSpecification;
-import com.continuuity.api.flow.FlowletDefinition;
-import com.continuuity.api.flow.flowlet.GeneratorFlowlet;
-import com.continuuity.api.procedure.ProcedureSpecification;
 import com.continuuity.app.Id;
 import com.continuuity.app.deploy.Manager;
 import com.continuuity.app.deploy.ManagerFactory;
 import com.continuuity.app.program.ManifestFields;
 import com.continuuity.app.services.AppFabricService;
+import com.continuuity.app.services.ArchiveId;
+import com.continuuity.app.services.ArchiveInfo;
 import com.continuuity.app.services.AuthToken;
 import com.continuuity.app.services.DeploymentStatus;
-import com.continuuity.app.services.ResourceIdentifier;
-import com.continuuity.app.services.ResourceInfo;
 import com.continuuity.archive.JarFinder;
 import com.continuuity.common.conf.CConfiguration;
+import com.continuuity.common.conf.Constants;
+import com.continuuity.common.utils.Networks;
+import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
 import com.continuuity.internal.app.BufferFileInputStream;
 import com.continuuity.internal.app.deploy.LocalManager;
 import com.continuuity.internal.app.deploy.pipeline.ApplicationWithPrograms;
-import com.continuuity.test.internal.bytecode.FlowletRewriter;
-import com.continuuity.test.internal.bytecode.ProcedureRewriter;
 import com.continuuity.test.internal.guice.AppFabricTestModule;
 import com.continuuity.weave.filesystem.LocalLocationFactory;
 import com.continuuity.weave.filesystem.Location;
@@ -33,27 +30,20 @@ import com.continuuity.weave.filesystem.LocationFactory;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
-import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.URL;
 import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.Enumeration;
-import java.util.Map;
 import java.util.Queue;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -72,14 +62,20 @@ public class TestHelper {
   public static CConfiguration configuration;
   private static Injector injector;
 
-  static {
-    configuration = CConfiguration.create();
-    configuration.set("app.output.dir", TEMP_FOLDER.newFolder("app").getAbsolutePath());
-    configuration.set("app.tmp.dir", TEMP_FOLDER.newFolder("temp").getAbsolutePath());
-    injector = Guice.createInjector(new AppFabricTestModule(configuration));
+  public static Injector getInjector() {
+    return getInjector(CConfiguration.create());
   }
 
-  public static Injector getInjector() {
+  public static synchronized Injector getInjector(CConfiguration conf) {
+    if (injector == null) {
+      configuration = conf;
+      configuration.set(Constants.AppFabric.OUTPUT_DIR, TEMP_FOLDER.newFolder("app").getAbsolutePath());
+      configuration.set(Constants.AppFabric.TEMP_DIR, TEMP_FOLDER.newFolder("temp").getAbsolutePath());
+      configuration.set(Constants.AppFabric.REST_PORT, Integer.toString(Networks.getRandomPort()));
+      configuration.set(Constants.AppFabric.SERVER_PORT, Integer.toString(Networks.getRandomPort()));
+      injector = Guice.createInjector(new AppFabricTestModule(configuration));
+      injector.getInstance(InMemoryTransactionManager.class).init();
+    }
     return injector;
   }
 
@@ -100,7 +96,7 @@ public class TestHelper {
    * @return Returns an instance of {@link LocalManager}
    */
   public static Manager<Location, ApplicationWithPrograms> getLocalManager() {
-    ManagerFactory factory = injector.getInstance(ManagerFactory.class);
+    ManagerFactory factory = getInjector().getInstance(ManagerFactory.class);
     return factory.create();
   }
 
@@ -129,8 +125,8 @@ public class TestHelper {
    */
   public static void deployApplication(Class<? extends Application> applicationClz, String fileName) throws Exception {
     Location deployedJar =
-      deployApplication(injector.getInstance(AppFabricService.Iface.class),
-                        injector.getInstance(com.continuuity.weave.filesystem.LocationFactory.class), DefaultId.ACCOUNT,
+      deployApplication(getInjector().getInstance(AppFabricService.Iface.class),
+                        getInjector().getInstance(LocationFactory.class), DefaultId.ACCOUNT,
                         DUMMY_AUTH_TOKEN, "", fileName, applicationClz);
     deployedJar.delete(true);
   }
@@ -141,8 +137,8 @@ public class TestHelper {
   public static void deployApplication(final Id.Account account, final AuthToken token,
                                        Class<? extends Application> applicationClz, String fileName) throws Exception {
     Location deployedJar =
-      deployApplication(injector.getInstance(AppFabricService.Iface.class),
-                        injector.getInstance(com.continuuity.weave.filesystem.LocationFactory.class), account, token,
+      deployApplication(getInjector().getInstance(AppFabricService.Iface.class),
+                        getInjector().getInstance(LocationFactory.class), account, token,
                         "", fileName, applicationClz);
     deployedJar.delete(true);
   }
@@ -169,10 +165,9 @@ public class TestHelper {
 
       Application application = applicationClz.newInstance();
       ApplicationSpecification appSpec = application.configure();
-      Location deployedJar = locationFactory.create(createDeploymentJar(applicationClz, appSpec).getAbsolutePath());
+      Location deployedJar = locationFactory.create(createDeploymentJar(applicationClz, appSpec).toURI());
 
-      ResourceIdentifier id = appFabricServer.init(
-        token, new ResourceInfo(account, applicationId, fileName, 0, System.currentTimeMillis()));
+      ArchiveId id = appFabricServer.init(token, new ArchiveInfo(account, applicationId, fileName));
 
       // Upload the jar file to remote location.
       BufferFileInputStream is = new BufferFileInputStream(deployedJar.getInputStream(), 100 * 1024);
@@ -195,7 +190,7 @@ public class TestHelper {
         status = appFabricServer.dstatus(token, id).getOverall();
         TimeUnit.MILLISECONDS.sleep(100);
       }
-      Preconditions.checkState(status == 5, "Fail to deploy app.");
+      Preconditions.checkState(status == 5, "Fail to deploy app: %s", status);
       return deployedJar;
   }
 
@@ -275,25 +270,6 @@ public class TestHelper {
     Queue<File> queue = Lists.newLinkedList();
     Collections.addAll(queue, dir.listFiles());
 
-    // Find all flowlet classes (flowlet class => flowId)
-    // Note: Limitation now is that the same flowlet class can be used in one flow only (can have multiple names)
-    Map<String, String> flowletClassNames = Maps.newHashMap();
-    for (FlowSpecification flowSpec : appSpec.getFlows().values()) {
-      for (FlowletDefinition flowletDef : flowSpec.getFlowlets().values()) {
-        flowletClassNames.put(flowletDef.getFlowletSpec().getClassName(), flowSpec.getName());
-      }
-    }
-
-    // Find all procedure classes
-    Set<String> procedureClassNames = Sets.newHashSet();
-    for (ProcedureSpecification procedureSpec : appSpec.getProcedures().values()) {
-      procedureClassNames.add(procedureSpec.getClassName());
-    }
-
-    FlowletRewriter flowletRewriter = new FlowletRewriter(appSpec.getName(), false);
-    FlowletRewriter generatorRewriter = new FlowletRewriter(appSpec.getName(), true);
-    ProcedureRewriter procedureRewriter = new ProcedureRewriter(appSpec.getName());
-
     URI basePath = relativeBase.toURI();
     while (!queue.isEmpty()) {
       File file = queue.remove();
@@ -301,24 +277,7 @@ public class TestHelper {
       jarOut.putNextEntry(new JarEntry(entryName));
 
       if (file.isFile()) {
-        InputStream is = new FileInputStream(file);
-        try {
-          byte[] bytes = ByteStreams.toByteArray(is);
-          String className = pathToClassName(entryName);
-          if (flowletClassNames.containsKey(className)) {
-            if (GeneratorFlowlet.class.isAssignableFrom(Class.forName(className))) {
-              jarOut.write(generatorRewriter.generate(bytes, flowletClassNames.get(className)));
-            } else {
-              jarOut.write(flowletRewriter.generate(bytes, flowletClassNames.get(className)));
-            }
-          } else if (procedureClassNames.contains(className)) {
-            jarOut.write(procedureRewriter.generate(bytes));
-          } else {
-            jarOut.write(bytes);
-          }
-        } finally {
-          is.close();
-        }
+        Files.copy(file, jarOut);
       } else {
         Collections.addAll(queue, file.listFiles());
       }

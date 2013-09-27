@@ -77,7 +77,7 @@ configurations{
 import org.apache.tools.ant.filters.ReplaceTokens
 import org.gradle.api.tasks.bundling.Compression
 
-task reactor_sdk_dist (type: Zip, dependsOn: ':web-cloud-app:build') {
+task reactor_sdk_dist (type: Zip, dependsOn: ':web-app:build') {
   group = 'Continuuity'
 
   baseName = "continuuity"
@@ -96,9 +96,8 @@ task reactor_sdk_dist (type: Zip, dependsOn: ':web-cloud-app:build') {
   into ("bin"){
     // :singlenode/bin contains the startscript, not using startScripts task
     // include project bin directories
-    from project.parent.subprojects.collect { project ->
-      project.file('bin')
-    }
+    from project.parent.subprojects.findAll { ! ['performance','commandLine'].contains(it.name) }
+                                           .collect { project -> project.file('bin') }
 
     exclude 'node'
     exclude 'far-server'
@@ -106,8 +105,6 @@ task reactor_sdk_dist (type: Zip, dependsOn: ':web-cloud-app:build') {
     exclude 'flow-config.sh'
     exclude 'service'
     exclude 'dfbench'
-    exclude 'benchmark'
-    exclude 'event-gen'
     exclude 'flume-client'
     exclude 'NonceCleanup.sh'
     exclude 'common*'
@@ -160,6 +157,7 @@ task reactor_sdk_dist (type: Zip, dependsOn: ':web-cloud-app:build') {
     exclude "PayvmentDemo/"
     exclude "DependencyRandomNumber/"
     exclude "TwitterScanner/"
+    exclude "ResourceSpammer/"
     exclude "LishApps/"
     exclude "AggregateMetrics/"
     exclude "lib/"
@@ -167,16 +165,16 @@ task reactor_sdk_dist (type: Zip, dependsOn: ':web-cloud-app:build') {
   }
 
   //webapp
-  into ("web-app/developer/client"){
-    from project(':web-cloud-app').file('build/local/client')
+  into ("web-app/local/client"){
+    from project(':web-app').file('build/local/client')
   }
 
-  into("web-app/developer/server"){
-    from project(':web-cloud-app').file('build/local/server')
+  into("web-app/local/server"){
+    from project(':web-app').file('build/local/server')
   }
 
-  into("web-app/developer/common"){
-    from project(':web-cloud-app').file('build/local/common')
+  into("web-app/local/common"){
+    from project(':web-app').file('build/local/common')
   }
 
   // VERSION
@@ -200,7 +198,7 @@ task reactor_sdk_dist (type: Zip, dependsOn: ':web-cloud-app:build') {
 }
 
 task sandbox_dist (type: Zip) {
-  dependsOn ':web-cloud-app:build' //webapp-server stuff TODO revisit this
+  dependsOn ':web-app:build' //webapp-server stuff TODO revisit this
   group = 'Continuuity'
 
   baseName = "continuuity"
@@ -221,9 +219,8 @@ task sandbox_dist (type: Zip) {
   into ("bin"){
     // :singlenode/bin contains the startscript, not using startScripts task
     // include project bin directories
-    from project.parent.subprojects.collect { project ->
-      project.file('bin')
-    }
+    from project.parent.subprojects.findAll { ! ['performance','commandLine'].contains(it.name) }
+                                           .collect { project -> project.file('bin') }
 
     exclude 'node'
     exclude 'far-server'
@@ -231,8 +228,6 @@ task sandbox_dist (type: Zip) {
     exclude 'flow-config.sh'
     exclude 'service'
     exclude 'dfbench'
-    exclude 'benchmark'
-    exclude 'event-gen'
     exclude 'flume-client'
     exclude 'NonceCleanup.sh'
     exclude 'common*'
@@ -257,17 +252,17 @@ task sandbox_dist (type: Zip) {
 
   //webapp
   into ("web-app/cloud/client"){
-    from project(':web-cloud-app').file('build/sandbox/client')
+    from project(':web-app').file('build/sandbox/client')
   }
 
   into("web-app/cloud/server"){
-    from project(':web-cloud-app').file('build/sandbox/server')
+    from project(':web-app').file('build/sandbox/server')
     exclude "continuuity-local.xml"
     exclude "certs/"
   }
 
   into("web-app/cloud/common"){
-    from project(':web-cloud-app').file('build/sandbox/common')
+    from project(':web-app').file('build/sandbox/common')
   }
 
   // VERSION

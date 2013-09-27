@@ -2,21 +2,20 @@ package com.continuuity.test.internal;
 
 import com.continuuity.api.ApplicationSpecification;
 import com.continuuity.api.data.DataSet;
+import com.continuuity.app.services.ProgramDescriptor;
+import com.continuuity.app.services.ProgramId;
+import com.continuuity.app.services.ProgramStatus;
 import com.continuuity.common.queue.QueueName;
 import com.continuuity.app.services.AppFabricService;
 import com.continuuity.app.services.AuthToken;
 import com.continuuity.app.services.EntityType;
-import com.continuuity.app.services.FlowDescriptor;
-import com.continuuity.app.services.FlowIdentifier;
-import com.continuuity.app.services.FlowStatus;
 import com.continuuity.archive.JarClassLoader;
 import com.continuuity.data.DataFabric;
-import com.continuuity.data.DataFabricImpl;
+import com.continuuity.data.DataFabric2Impl;
+import com.continuuity.data.DataSetAccessor;
 import com.continuuity.data.dataset.DataSetInstantiator;
-import com.continuuity.data.operation.OperationContext;
-import com.continuuity.data.operation.executor.OperationExecutor;
-import com.continuuity.data.operation.executor.SynchronousTransactionAgent;
-import com.continuuity.data.operation.executor.TransactionProxy;
+import com.continuuity.data2.transaction.TransactionContext;
+import com.continuuity.data2.transaction.TransactionSystemClient;
 import com.continuuity.test.ApplicationManager;
 import com.continuuity.test.FlowManager;
 import com.continuuity.test.MapReduceManager;
@@ -46,18 +45,20 @@ import java.util.concurrent.TimeoutException;
  */
 public class DefaultApplicationManager implements ApplicationManager {
 
-  private final ConcurrentMap<String, FlowIdentifier> runningProcessses = Maps.newConcurrentMap();
+  private final ConcurrentMap<String, ProgramId> runningProcessses = Maps.newConcurrentMap();
   private final AuthToken token;
   private final String accountId;
   private final String applicationId;
   private final AppFabricService.Iface appFabricServer;
+  private final TransactionSystemClient txSystemClient;
   private final DataSetInstantiator dataSetInstantiator;
   private final StreamWriterFactory streamWriterFactory;
   private final ProcedureClientFactory procedureClientFactory;
 
   @Inject
-  public DefaultApplicationManager(OperationExecutor opex,
-                                   LocationFactory locationFactory,
+  public DefaultApplicationManager(LocationFactory locationFactory,
+                                   DataSetAccessor dataSetAccessor,
+                                   TransactionSystemClient txSystemClient,
                                    StreamWriterFactory streamWriterFactory,
                                    ProcedureClientFactory procedureClientFactory,
                                    @Assisted AuthToken token,
@@ -72,16 +73,14 @@ public class DefaultApplicationManager implements ApplicationManager {
     this.appFabricServer = appFabricServer;
     this.streamWriterFactory = streamWriterFactory;
     this.procedureClientFactory = procedureClientFactory;
+    this.txSystemClient = txSystemClient;
 
-    OperationContext ctx = new OperationContext(accountId, applicationId);
-    DataFabric dataFabric = new DataFabricImpl(opex, locationFactory, ctx);
-    TransactionProxy proxy = new TransactionProxy();
-    proxy.setTransactionAgent(new SynchronousTransactionAgent(opex, ctx));
+    DataFabric dataFabric = new DataFabric2Impl(locationFactory, dataSetAccessor);
 
     try {
       // Since we expose the DataSet class, it has to be loaded using ClassLoader delegation.
       // The drawback is we'll not be able to instrument DataSet classes using ASM.
-      this.dataSetInstantiator = new DataSetInstantiator(dataFabric, proxy,
+      this.dataSetInstantiator = new DataSetInstantiator(dataFabric,
                                                          new DataSetClassLoader(new JarClassLoader(deployedJar)));
     } catch (IOException e) {
       throw Throwables.propagate(e);
@@ -97,11 +96,11 @@ public class DefaultApplicationManager implements ApplicationManager {
   @Override
   public FlowManager startFlow(final String flowName, Map<String, String> arguments) {
     try {
-      final FlowIdentifier flowId = new FlowIdentifier(accountId, applicationId, flowName, 0);
+      final ProgramId flowId = new ProgramId(accountId, applicationId, flowName);
       Preconditions.checkState(runningProcessses.putIfAbsent(flowName, flowId) == null,
                                "Flow %s is already running", flowName);
       try {
-        appFabricServer.start(token, new FlowDescriptor(flowId, arguments));
+        appFabricServer.start(token, new ProgramDescriptor(flowId, arguments));
       } catch (Exception e) {
         runningProcessses.remove(flowName);
         throw Throwables.propagate(e);
@@ -142,7 +141,7 @@ public class DefaultApplicationManager implements ApplicationManager {
   @Override
   public MapReduceManager startMapReduce(final String jobName, Map<String, String> arguments) {
     try {
-      final FlowIdentifier jobId = new FlowIdentifier(accountId, applicationId, jobName, 0);
+      final ProgramId jobId = new ProgramId(accountId, applicationId, jobName);
       jobId.setType(EntityType.MAPREDUCE);
 
       // mapreduce job can stop by itself, so refreshing info about its state
@@ -153,7 +152,7 @@ public class DefaultApplicationManager implements ApplicationManager {
       Preconditions.checkState(runningProcessses.putIfAbsent(jobName, jobId) == null,
                                "MapReduce job %s is already running", jobName);
       try {
-        appFabricServer.start(token, new FlowDescriptor(jobId, arguments));
+        appFabricServer.start(token, new ProgramDescriptor(jobId, arguments));
       } catch (Exception e) {
         runningProcessses.remove(jobName);
         throw Throwables.propagate(e);
@@ -197,12 +196,12 @@ public class DefaultApplicationManager implements ApplicationManager {
   @Override
   public ProcedureManager startProcedure(final String procedureName, Map<String, String> arguments) {
     try {
-      final FlowIdentifier procedureId = new FlowIdentifier(accountId, applicationId, procedureName, 0);
-      procedureId.setType(EntityType.QUERY);
+      final ProgramId procedureId = new ProgramId(accountId, applicationId, procedureName);
+      procedureId.setType(EntityType.PROCEDURE);
       Preconditions.checkState(runningProcessses.putIfAbsent(procedureName, procedureId) == null,
                                "Procedure %s is already running", procedureName);
       try {
-        appFabricServer.start(token, new FlowDescriptor(procedureId, arguments));
+        appFabricServer.start(token, new ProgramDescriptor(procedureId, arguments));
       } catch (Exception e) {
         runningProcessses.remove(procedureName);
         throw Throwables.propagate(e);
@@ -238,13 +237,22 @@ public class DefaultApplicationManager implements ApplicationManager {
 
   @Override
   public <T extends DataSet> T getDataSet(String dataSetName) {
-    return dataSetInstantiator.getDataSet(dataSetName);
+    T dataSet = dataSetInstantiator.getDataSet(dataSetName);
+
+    // now we have to start tx of TxDs2 on agent. This will go way once agent is removed
+    try {
+      TransactionContext txContext = new TransactionContext(txSystemClient, dataSetInstantiator.getTransactionAware());
+      txContext.start();
+    } catch (Exception e) {
+      throw Throwables.propagate(e);
+    }
+    return dataSet;
   }
 
   @Override
   public void stopAll() {
     try {
-      for (Map.Entry<String, FlowIdentifier> entry : Iterables.consumingIterable(runningProcessses.entrySet())) {
+      for (Map.Entry<String, ProgramId> entry : Iterables.consumingIterable(runningProcessses.entrySet())) {
         // have to do a check, since mapreduce jobs could stop by themselves earlier, and appFabricServer.stop will
         // throw error when you stop smth that is not running.
         if (isRunning(entry.getValue())) {
@@ -272,9 +280,9 @@ public class DefaultApplicationManager implements ApplicationManager {
     }
   }
 
-  private boolean isRunning(FlowIdentifier flowId) {
+  private boolean isRunning(ProgramId flowId) {
     try {
-      FlowStatus status = appFabricServer.status(token, flowId);
+      ProgramStatus status = appFabricServer.status(token, flowId);
       // comparing to hardcoded string is ugly, but this is how appFabricServer works now to support legacy UI
       return "RUNNING".equals(status.getStatus());
     } catch (Exception e) {

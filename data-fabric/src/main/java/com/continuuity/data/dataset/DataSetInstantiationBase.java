@@ -2,13 +2,18 @@ package com.continuuity.data.dataset;
 
 import com.continuuity.api.data.DataSet;
 import com.continuuity.api.data.DataSetSpecification;
-import com.continuuity.api.data.OperationException;
 import com.continuuity.api.data.dataset.FileDataSet;
 import com.continuuity.api.data.dataset.MultiObjectStore;
 import com.continuuity.api.data.dataset.ObjectStore;
 import com.continuuity.api.data.dataset.table.Table;
+import com.continuuity.common.metrics.MetricsCollector;
 import com.continuuity.data.DataFabric;
-import com.continuuity.data.operation.executor.TransactionProxy;
+import com.continuuity.data2.RuntimeTable;
+import com.continuuity.data2.dataset.api.DataSetClient;
+import com.continuuity.data2.transaction.TransactionAware;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import com.google.common.reflect.TypeToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -18,6 +23,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * This class implements the core logic of instantiating data set, including injection of the data fabric runtime and
@@ -36,28 +42,16 @@ public class DataSetInstantiationBase {
   private Map<String, DataSetSpecification> datasets =
     new HashMap<String, DataSetSpecification>();
 
+  private Set<TransactionAware> txAware = Sets.newIdentityHashSet();
+  // in this collection we have only datasets initialized with getDataSet() which is OK for now...
+  private Map<TransactionAware, String> txAwareToMetricNames = Maps.newIdentityHashMap();
+
   public DataSetInstantiationBase() {
     this.classLoader = null;
   }
 
   public DataSetInstantiationBase(ClassLoader classLoader) {
     this.classLoader = classLoader;
-  }
-
-  /**
-   * Set the read/only flag. If this is true, then the tables injected into each
-   * dataset will be ReadOnlyTable's, otherwise they will be ReadWriteTable's.
-   * Default is false.
-   */
-  public void setReadOnly() {
-    this.readOnly = true;
-  }
-
-  /**
-   * Whether this is a read-only instantiation.
-   */
-  public boolean isReadOnly() {
-    return readOnly;
   }
 
   /**
@@ -95,10 +89,8 @@ public class DataSetInstantiationBase {
    *  runtime into the new data set.
    *  @param dataSetName the name of the data set to instantiate
    *  @param fabric the data fabric to inject
-   *  @param proxy the transaction proxy to inject
    */
-  public
-  <T extends DataSet> T getDataSet(String dataSetName, DataFabric fabric, TransactionProxy proxy)
+  public <T extends DataSet> T getDataSet(String dataSetName, DataFabric fabric)
     throws DataSetInstantiationException {
 
     // find the data set specification
@@ -141,10 +133,27 @@ public class DataSetInstantiationBase {
     }
 
     // inject the data fabric runtime
-    this.injectDataFabric(ds, dataSetName, fabric, proxy);
+    this.injectDataFabric(ds, dataSetName, fabric);
 
     // cast to the actual data set class and return
     return this.convert(ds, className);
+  }
+
+
+  /**
+   * Returns an immutable life Iterable of {@link TransactionAware} objects.
+   */
+  // NOTE: this is needed for now to minimize destruction of early integration of txds2
+  public Iterable<TransactionAware> getTransactionAware() {
+    return Iterables.unmodifiableIterable(txAware);
+  }
+
+  public void addTransactionAware(TransactionAware transactionAware) {
+    txAware.add(transactionAware);
+  }
+
+  public void removeTransactionAware(TransactionAware transactionAware) {
+    txAware.remove(transactionAware);
   }
 
   /**
@@ -185,24 +194,27 @@ public class DataSetInstantiationBase {
    * @param obj The com.continuuity.data.dataset to inject into
    * @param metricName the name to inject for emitting metrics
    * @param fabric the data fabric to inject
-   * @param proxy the transaction proxy to inject
    * @throws DataSetInstantiationException If any of the reflection magic
    *         goes wrong, or a table cannot be opened
    */
-  private void injectDataFabric(Object obj, String metricName, DataFabric fabric, TransactionProxy proxy)
+  private void injectDataFabric(Object obj, String metricName, DataFabric fabric)
     throws DataSetInstantiationException {
     // for base data set types, directly inject the df fields
     if (obj instanceof Table) {
-      // this sets the delegate table of the Table to a new ReadWriteTable
-      RuntimeTable runtimeTable = this.isReadOnly()
-        ? ReadOnlyTable.setReadOnlyTable((Table) obj, fabric, metricName, proxy)
-        : ReadWriteTable.setReadWriteTable((Table) obj, fabric, metricName, proxy);
-      // also ensure that the table exists in the data fabric
+      // this sets the delegate table of the Table
+      Table table = (Table) obj;
+      RuntimeTable runtimeTable;
       try {
-        runtimeTable.open();
-      } catch (OperationException e) {
+        runtimeTable = RuntimeTable.setRuntimeTable(table, fabric, metricName);
+      } catch (Exception e) {
         throw new DataSetInstantiationException(
-          "Failed to open table '" + runtimeTable.getName() + "'.", e);
+          "Failed to open table '" + table.getName() + "'.", e);
+      }
+
+      TransactionAware txAware = runtimeTable.getTxAware();
+      if (txAware != null) {
+        this.txAware.add(txAware);
+        this.txAwareToMetricNames.put(txAware, metricName);
       }
       return;
     }
@@ -245,7 +257,7 @@ public class DataSetInstantiationBase {
                                   field.getName(), obj.getClass().getName());
           }
           if (fieldValue != null) {
-            injectDataFabric(fieldValue, metricName, fabric, proxy);
+            injectDataFabric(fieldValue, metricName, fabric);
           }
         }
       }
@@ -263,12 +275,41 @@ public class DataSetInstantiationBase {
     if (e == null) {
       msg = String.format("Error instantiating data set: %s.", String.format(message, params));
       exn = new DataSetInstantiationException(msg);
+      Log.error(msg);
     } else {
       msg = String.format("Error instantiating data set: %s. %s", String.format(message, params), e.getMessage());
       exn = new DataSetInstantiationException(msg, e);
+      Log.error(msg, e);
     }
-    Log.error(msg);
     return exn;
   }
 
+  public void setMetricsCollector(final MetricsCollector programContextMetrics) {
+
+    for (Map.Entry<TransactionAware, String> txAware : this.txAwareToMetricNames.entrySet()) {
+      if (txAware.getKey() instanceof DataSetClient) {
+        final String dataSetName = txAware.getValue();
+        DataSetClient.DataOpsMetrics dataOpsMetrics = new DataSetClient.DataOpsMetrics() {
+          @Override
+          public void recordRead(int opsCount) {
+            if (programContextMetrics != null) {
+              programContextMetrics.gauge("store.reads", 1, dataSetName);
+              programContextMetrics.gauge("store.ops", 1);
+            }
+          }
+
+          @Override
+          public void recordWrite(int opsCount, int dataSize) {
+            if (programContextMetrics != null) {
+              programContextMetrics.gauge("store.writes", 1, dataSetName);
+              programContextMetrics.gauge("store.bytes", dataSize, dataSetName);
+              programContextMetrics.gauge("store.ops", 1);
+            }
+          }
+        };
+
+        ((DataSetClient) txAware.getKey()).setMetricsCollector(dataOpsMetrics);
+      }
+    }
+  }
 }

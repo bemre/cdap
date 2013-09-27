@@ -16,10 +16,11 @@ import com.google.common.collect.Table;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 
 /**
- * {@link Store} operates on a {@link com.continuuity.app.program.Program}. It's responsible
- * for managing the non-runtime lifecycle of a {@link com.continuuity.app.program.Program}
+ * {@link Store} operates on a {@link Program}. It's responsible
+ * for managing the non-runtime lifecycle of a {@link Program}
  */
 public interface Store {
 
@@ -28,7 +29,7 @@ public interface Store {
    *
    * @param program id of the program
    * @param type of program
-   * @return An instance of {@link Program} if found.
+   * @return An instance of {@link com.continuuity.app.program.DefaultProgram} if found.
    * @throws IOException
    */
   Program loadProgram(Id.Program program, Type type) throws IOException;
@@ -97,6 +98,7 @@ public interface Store {
 
   /**
    * Returns location of the application archive.
+   *
    * @param id application id
    * @return application archive location
    * @throws OperationException
@@ -105,12 +107,22 @@ public interface Store {
 
   /**
    * Sets number of instances of specific flowlet.
+   *
    * @param id flow id
    * @param flowletId flowlet id
    * @param count new number of instances
    * @throws OperationException
    */
   void setFlowletInstances(Id.Program id, String flowletId, int count) throws OperationException;
+
+  /**
+   * Gets number of instances of specific flowlet.
+   *
+   * @param id flow id
+   * @param flowletId flowlet id
+   * @throws OperationException
+   */
+  int getFlowletInstances(Id.Program id, String flowletId) throws OperationException;
 
   /**
    * Removes program data.
@@ -120,6 +132,7 @@ public interface Store {
 
   /**
    * Removes all program under the given application and also the application itself.
+   *
    * @param id Application id
    * @return An {@link ApplicationSpecification} of the application being removed.
    * @throws OperationException
@@ -128,13 +141,34 @@ public interface Store {
 
   /**
    * Removes all applications (with programs) of the given account.
+   *
    * @param id account id whose applications to remove
    */
   void removeAllApplications(Id.Account id) throws OperationException;
 
   /**
    * Remove all metadata associated with account.
+   *
    * @param id account id whose items to remove
    */
   void removeAll(Id.Account id) throws OperationException;
+
+  /**
+   * Store the user arguments needed in the run-time.
+   *
+   * @param programId id of program
+   * @param arguments Map of key value arguments
+   * @throws OperationException
+   */
+  void storeRunArguments(Id.Program programId, Map<String, String> arguments) throws OperationException;
+
+  /**
+   * Get run time arguments for a program.
+   *
+   * @param programId id of the program.
+   * @return Map of key, value pairs
+   * @throws OperationException
+   */
+  Map<String, String> getRunArguments(Id.Program programId) throws OperationException;
+
 }

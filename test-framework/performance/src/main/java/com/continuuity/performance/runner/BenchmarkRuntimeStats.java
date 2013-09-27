@@ -148,19 +148,19 @@ public final class BenchmarkRuntimeStats {
   // Gets new metrics client for retrieving metrics from metrics system.
   private static MetricsClient getMetricsClient() {
     Iterable<Discoverable> it =
-      PerformanceTestRunner.getDiscoveryServiceClient().discover(Constants.SERVICE_METRICS);
+      PerformanceTestRunner.getDiscoveryServiceClient().discover(Constants.Service.METRICS);
     for (int attempts = 0; Iterables.isEmpty(it) && (attempts++ < 10); attempts++) {
       try {
         TimeUnit.MILLISECONDS.sleep(200);
       } catch (InterruptedException e) {
         throw new RuntimeException(String.format("Interrupted when trying to locate service '%s'",
-                                                 Constants.SERVICE_METRICS));
+                                                 Constants.Service.METRICS));
       }
     }
     try {
       return new MetricsClient(it.iterator().next().getSocketAddress());
     } catch (Exception e) {
-      throw new RuntimeException(String.format("Could not locate service '%s'", Constants.SERVICE_METRICS), e);
+      throw new RuntimeException(String.format("Could not locate service '%s'", Constants.Service.METRICS), e);
     }
   }
 
@@ -212,7 +212,7 @@ public final class BenchmarkRuntimeStats {
       List<MetricsResponse> responseData = GSON.fromJson(response,
                                                          new TypeToken<List<MetricsResponse>>(){}.getType());
 
-      if (responseData == null || responseData.size() == 0) {
+      if (responseData == null || responseData.isEmpty()) {
         throw new RuntimeException(String.format("No metric received from metrics system for request %s", counterPath));
       }
       if (responseData.size() > 1) {

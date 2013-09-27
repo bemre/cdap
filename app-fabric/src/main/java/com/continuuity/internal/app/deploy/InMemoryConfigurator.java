@@ -10,7 +10,6 @@ import com.continuuity.app.Id;
 import com.continuuity.app.deploy.ConfigResponse;
 import com.continuuity.app.deploy.Configurator;
 import com.continuuity.app.program.Archive;
-import com.continuuity.common.utils.StackTraceUtil;
 import com.continuuity.internal.app.ApplicationSpecificationAdapter;
 import com.continuuity.internal.io.ReflectionSchemaGenerator;
 import com.continuuity.weave.filesystem.Location;
@@ -55,7 +54,7 @@ public final class InMemoryConfigurator implements Configurator {
    *
    * @param archive name of the archive file for which configure is invoked in-memory.
    */
-  public InMemoryConfigurator(Id.Account id, com.continuuity.weave.filesystem.Location archive) {
+  public InMemoryConfigurator(Id.Account id, Location archive) {
     Preconditions.checkNotNull(id);
     Preconditions.checkNotNull(archive);
     this.id = id;
@@ -136,7 +135,7 @@ public final class InMemoryConfigurator implements Configurator {
         try {
           writer.close();
         } catch (IOException e) {
-          LOG.debug(StackTraceUtil.toStringStackTrace(e));
+          LOG.debug(e.getMessage(), e);
           return Futures.immediateFailedFuture(e);
         }
       }

@@ -4,29 +4,27 @@ import com.continuuity.api.Application;
 import com.continuuity.api.ApplicationSpecification;
 import com.continuuity.api.annotation.Output;
 import com.continuuity.api.annotation.ProcessInput;
+import com.continuuity.api.annotation.Tick;
 import com.continuuity.api.annotation.UseDataSet;
 import com.continuuity.api.data.OperationException;
 import com.continuuity.api.data.dataset.KeyValueTable;
 import com.continuuity.api.flow.Flow;
 import com.continuuity.api.flow.FlowSpecification;
 import com.continuuity.api.flow.flowlet.AbstractFlowlet;
-import com.continuuity.api.flow.flowlet.AbstractGeneratorFlowlet;
 import com.continuuity.api.flow.flowlet.OutputEmitter;
 import com.continuuity.app.program.Program;
 import com.continuuity.app.runtime.Arguments;
 import com.continuuity.app.runtime.ProgramController;
 import com.continuuity.app.runtime.ProgramOptions;
 import com.continuuity.app.runtime.ProgramRunner;
-import com.continuuity.data.DataFabricImpl;
+import com.continuuity.data.DataFabric2Impl;
+import com.continuuity.data.DataSetAccessor;
 import com.continuuity.data.dataset.DataSetInstantiator;
-import com.continuuity.data.operation.OperationContext;
-import com.continuuity.data.operation.executor.OperationExecutor;
-import com.continuuity.data.operation.executor.SynchronousTransactionAgent;
-import com.continuuity.data.operation.executor.TransactionProxy;
+import com.continuuity.data2.transaction.TransactionExecutor;
+import com.continuuity.data2.transaction.TransactionExecutorFactory;
 import com.continuuity.internal.app.deploy.pipeline.ApplicationWithPrograms;
 import com.continuuity.internal.app.runtime.BasicArguments;
 import com.continuuity.internal.app.runtime.ProgramRunnerFactory;
-import com.continuuity.test.internal.DefaultId;
 import com.continuuity.test.internal.TestHelper;
 import com.continuuity.weave.filesystem.LocationFactory;
 import com.google.common.collect.ImmutableList;
@@ -73,9 +71,9 @@ public class MultiConsumerTest {
         .setDescription("MultiFlow")
         .withFlowlets()
           .add("gen", new Generator())
-          .add("c1", new Consumer())
-          .add("c2", new Consumer())
-          .add("c3", new ConsumerStr())
+          .add("c1", new Consumer(), 2)
+          .add("c2", new Consumer(), 2)
+          .add("c3", new ConsumerStr(), 2)
         .connect()
           .from("gen").to("c1")
           .from("gen").to("c2")
@@ -87,14 +85,14 @@ public class MultiConsumerTest {
   /**
    *
    */
-  public static final class Generator extends AbstractGeneratorFlowlet {
+  public static final class Generator extends AbstractFlowlet {
 
     private OutputEmitter<Integer> output;
     @Output("str")
     private OutputEmitter<String> outString;
     private int i;
 
-    @Override
+    @Tick(delay = 1L, unit = TimeUnit.NANOSECONDS)
     public void generate() throws Exception {
       if (i < 100) {
         output.emit(i);
@@ -113,6 +111,7 @@ public class MultiConsumerTest {
     @UseDataSet("accumulated")
     private KeyValueTable accumulated;
 
+    @ProcessInput(maxRetries = Integer.MAX_VALUE)
     public void process(long l) throws OperationException {
       accumulated.increment(KEY, l);
     }
@@ -125,9 +124,9 @@ public class MultiConsumerTest {
     @UseDataSet("accumulated")
     private KeyValueTable accumulated;
 
-    @ProcessInput("str")
+    @ProcessInput(value = "str", maxRetries = Integer.MAX_VALUE)
     public void process(String str) throws OperationException {
-      accumulated.increment(KEY, Long.parseLong(str));
+      accumulated.increment(KEY, Long.valueOf(str));
     }
   }
 
@@ -139,11 +138,11 @@ public class MultiConsumerTest {
 
     List<ProgramController> controllers = Lists.newArrayList();
     for (final Program program : app.getPrograms()) {
-      ProgramRunner runner = runnerFactory.create(ProgramRunnerFactory.Type.valueOf(program.getProcessorType().name()));
+      ProgramRunner runner = runnerFactory.create(ProgramRunnerFactory.Type.valueOf(program.getType().name()));
       controllers.add(runner.run(program, new ProgramOptions() {
         @Override
         public String getName() {
-          return program.getProgramName();
+          return program.getName();
         }
 
         @Override
@@ -160,22 +159,27 @@ public class MultiConsumerTest {
 
     TimeUnit.SECONDS.sleep(4);
 
-    OperationExecutor opex = TestHelper.getInjector().getInstance(OperationExecutor.class);
     LocationFactory locationFactory = TestHelper.getInjector().getInstance(LocationFactory.class);
-    OperationContext opCtx = new OperationContext(DefaultId.ACCOUNT.getId(),
-                                                  app.getAppSpecLoc().getSpecification().getName());
+    DataSetAccessor dataSetAccessor = TestHelper.getInjector().getInstance(DataSetAccessor.class);
 
-    TransactionProxy proxy = new TransactionProxy();
-    proxy.setTransactionAgent(new SynchronousTransactionAgent(opex, opCtx));
-    DataSetInstantiator dataSetInstantiator = new DataSetInstantiator(new DataFabricImpl(opex, locationFactory, opCtx),
-                                                                      proxy,
-                                                                      getClass().getClassLoader());
+    DataSetInstantiator dataSetInstantiator =
+      new DataSetInstantiator(new DataFabric2Impl(locationFactory, dataSetAccessor),
+                              getClass().getClassLoader());
     dataSetInstantiator.setDataSets(ImmutableList.copyOf(new MultiApp().configure().getDataSets().values()));
 
-    KeyValueTable accumulated = dataSetInstantiator.getDataSet("accumulated");
-    byte[] value = accumulated.read(KEY);
+    final KeyValueTable accumulated = dataSetInstantiator.getDataSet("accumulated");
+    TransactionExecutorFactory txExecutorFactory =
+      TestHelper.getInjector().getInstance(TransactionExecutorFactory.class);
 
-    Assert.assertEquals(14850L, Longs.fromByteArray(value));
+    txExecutorFactory.createExecutor(dataSetInstantiator.getTransactionAware())
+      .execute(new TransactionExecutor.Subroutine() {
+        @Override
+        public void apply() throws Exception {
+          byte[] value = accumulated.read(KEY);
+          // Sum(1..100) * 3
+          Assert.assertEquals(((1 + 99) * 99 / 2) * 3, Longs.fromByteArray(value));
+        }
+    });
 
     for (ProgramController controller : controllers) {
       controller.stop().get();

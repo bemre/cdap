@@ -1,0 +1,46 @@
+<!--
+    Copyright (c) 2013 to Continuuity Inc. All rights reserved.
+-->
+<configuration>
+
+	<property>
+		<name>cloud-ui-port</name>
+		<value>80</value>
+	</property>
+
+	<property>
+		<name>cloud-ui-ssl-port</name>
+		<value>443</value>
+	</property>
+
+	<property>
+		<name>accounts-host</name>
+		<value>accounts.continuuity.com</value>
+	</property>
+
+	<property>
+		<name>accounts-port</name>
+		<value>443</value>
+	</property>
+
+	<property>
+		<name>gateway.server.address</name>
+		<value>localhost</value>
+	</property>
+
+	<property>
+		<name>gateway.server.port</name>
+		<value>10000</value>
+	</property>
+
+	<property>
+        <name>gateway.cluster.name</name>
+        <value>box</value>
+    </property>
+
+	<property>
+		<name>cookie-secret</name>
+		<value>not-a-cookie</value>
+	</property>
+
+</configuration>

@@ -1,23 +1,33 @@
 <?xml version="1.0"?>
 <?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
 <!--
-    Copyright (c) to Continuuity Inc. All rights reserved.
+ Copyright (c) 2013, Continuuity Inc
+
+ All rights reserved.
+
+ Redistribution and use in source and binary forms,
+ with or without modification, are not permitted
+
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
+ WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+ GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -->
 <configuration>
 
-    <!--
-        Common configuration across all components.
-    -->
     <property>
-        <name>zookeeper.quorum</name>
-        <value>localhost:2181</value>
-        <description>Specifies the zookeeper host:port</description>
+        <name>reactor.namespace</name>
+        <value>/continuuity</value>
+        <description>Specifies the namespace for this instance of reactor.</description>
     </property>
 
     <property>
-        <name>command.port.enabled</name>
-        <value>false</value>
-        <description>Specifies whether command port should be enabled.</description>
+        <name>zookeeper.quorum</name>
+        <value>127.0.0.1:2181${reactor.namespace}</value>
+        <description>Specifies the zookeeper host:port</description>
     </property>
 
     <property>
@@ -31,110 +41,56 @@
     </property>
 
     <property>
-        <name>state.storage.connection.url</name>
-        <value>jdbc:hsqldb:file:data/flow-state-management;user=sa</value>
-        <description>
-            Specifies the JDBC connection url for connecting to local or
-            remote storage for storing flow state, runs and active flows.
-        </description>
-    </property>
-
-    <property>
         <name>weave.zookeeper.namespace</name>
         <value>/weave</value>
         <description>Namespace prefix for weave zookeeper</description>
     </property>
 
-    <!--
-        Resource manager configurations.
-    -->
     <property>
-        <name>resource.manager.server.port</name>
-        <value>45000</value>
-        <description>Specifies the port on which Flow resource Manager will run.</description>
+        <name>hdfs.namespace</name>
+        <value>${reactor.namespace}</value>
+        <description>Namespace for files written by reactor.</description>
     </property>
 
     <property>
-        <name>resource.manager.server.threads</name>
-        <value>10</value>
-        <description>Specifies number of threads to be started for serving requests on flow resource manager</description>
+        <name>hdfs.user</name>
+        <value>yarn</value>
+        <description>User name for accessing HDFS.</description>
     </property>
 
     <property>
-        <name>resource.manager.remote.dir</name>
-        <value>data/resource/manager/remote</value>
-        <description>Specifies the base directory for storing resources</description>
+        <name>yarn.user</name>
+        <value>yarn</value>
+        <description>User name for running applications in YARN.</description>
     </property>
 
     <property>
-        <name>resource.manager.local.dir</name>
-        <value>data/resource/manager/local</value>
-        <description>Specifies the base directory for storing resources</description>
-    </property>
-
-    <property>
-        <name>resource.manager.server.address</name>
-        <value>localhost</value>
-        <description>Specifies the address to which the resource managerment service should bind to.</description>
-    </property>
-
-    <property>
-        <name>resource.manager.cloud.hostname</name>
-        <value>50.23.86.172</value>
-        <description>Specifies the resource manager hostname in cloud.</description>
-    </property>
-
-    <property>
-        <name>resource.manager.cloud.port</name>
-        <value>45000</value>
-        <description>Specifies the resource manager port in cloud.</description>
-    </property>
-
-
-    <!--
-        Flow Manager configuration.
-    -->
-    <property>
-        <name>flow.manager.server.address</name>
-        <value>localhost</value>
-        <description>Specifies the address to which the flow manager service should bind to.</description>
-    </property>
-
-    <property>
-        <name>flow.manager.server.port</name>
-        <value>45001</value>
-        <description>Specifies the port on which Flow resource Manager will run.</description>
-    </property>
-
-    <property>
-        <name>flow.manager.server.threads</name>
-        <value>10</value>
-        <description>Specifies number of threads to be started for serving requests on flow resource manager</description>
+        <name>local.data.dir</name>
+        <value>data</value>
+        <description>Data directory for local mode</description>
     </property>
 
     <!--
         Gateway configuration
     -->
     <property>
-        <name>gateway.hostname</name>
+        <name>gateway.bind.address</name>
         <value>localhost</value>
         <description>Specifies the hostname on which the Gateway will listen</description>
     </property>
 
     <property>
-        <name>gateway.port</name>
-        <value>9999</value>
+        <name>gateway.bind.port</name>
+        <value>10000</value>
         <description>Specifies the port on which the Gateway will listen</description>
     </property>
 
     <property>
         <name>gateway.connectors</name>
-        <value>data.rest,stream.flume,stream.rest,procedure.rest,monitor.rest,app.rest,systemstats.rest,meta.rest</value>
+        <value>stream.flume</value>
         <description>Specifies the list of Collectors we will use</description>
     </property>
 
-    <!-- Todd: I'm really unhappy that we have to use so much XML to describe
-         the Collectors, but that's 'cos we are using the Hadoop config object -->
     <property>
         <name>data.rest.class</name>
         <value>com.continuuity.gateway.accessor.DatasetRestAccessor</value>
@@ -142,131 +98,60 @@
     </property>
 
     <property>
-        <name>data.rest.port</name>
-        <value>10002</value>
+        <name>gateway.connection.backlog</name>
+        <value>20000</value>
+        <description>Max connection backlog of gateway</description>
     </property>
 
     <property>
-        <name>data.rest.threads</name>
+        <name>gateway.max.cached.stream.events.num</name>
+        <value>10000</value>
+        <description>Max number of stream events cached before flushing</description>
+    </property>
+
+    <property>
+        <name>gateway.max.cached.events.per.stream.num</name>
+        <value>5000</value>
+        <description>Max number of stream events of a single stream cached before flushing</description>
+    </property>
+
+    <property>
+        <name>gateway.max.cached.stream.events.bytes</name>
+        <value>52428800</value>
+        <description>Max size of stream events cached before flushing</description>
+    </property>
+
+    <property>
+        <name>gateway.stream.events.flush.interval.ms</name>
+        <value>150</value>
+        <description>Specifies the interval at which cached stream events get flushed</description>
+    </property>
+
+    <property>
+        <name>gateway.stream.callback.exec.num.threads</name>
+        <value>5</value>
+        <description>Number of threads in stream events callback executor</description>
+    </property>
+
+    <property>
+        <name>gateway.exec.threads</name>
         <value>20</value>
+        <description>Number of netty server executor threads</description>
     </property>
 
     <property>
-        <name>data.rest.middle</name>
-        <value>/data/</value>
-    </property>
-
-    <!-- Metadata Connector -->
-    <property>
-        <name>meta.rest.class</name>
-        <value>com.continuuity.gateway.accessor.MetaDataRestAccessor</value>
-        <description>Specifies the class for the meta data REST accessor</description>
+        <name>gateway.boss.threads</name>
+        <value>1</value>
+        <description>Number of netty server boss threads</description>
     </property>
 
     <property>
-        <name>meta.rest.port</name>
-        <value>10011</value>
-    </property>
-
-    <property>
-        <name>meta.rest.threads</name>
-        <value>5</value>
-    </property>
-
-    <property>
-        <name>meta.rest.middle</name>
-        <value>/metadata/</value>
-    </property>
-
-    <!-- AppFabric Connector -->
-    <property>
-        <name>app.rest.class</name>
-        <value>com.continuuity.gateway.connector.AppFabricRestConnector</value>
-        <description>Specifies the class for the REST accessor</description>
-    </property>
-
-    <property>
-        <name>app.rest.port</name>
-        <value>10007</value>
-    </property>
-
-    <property>
-        <name>app.rest.threads</name>
-        <value>5</value>
-    </property>
-
-    <property>
-        <name>app.rest.middle</name>
-        <value>/app</value>
-    </property>
-
-    <!-- Procedure Handler -->
-    <property>
-        <name>procedure.rest.class</name>
-        <value>com.continuuity.gateway.accessor.QueryRestAccessor</value>
-        <description>Specifies the class for the REST accessor</description>
-    </property>
-
-    <property>
-        <name>procedure.rest.port</name>
-        <value>10010</value>
-    </property>
-
-    <property>
-        <name>procedure.rest.threads</name>
-        <value>20</value>
-    </property>
-
-    <property>
-        <name>procedure.rest.middle</name>
-        <value>/procedure/</value>
-    </property>
-
-    <!-- Metrics handler -->
-    <property>
-        <name>monitor.rest.class</name>
-        <value>com.continuuity.gateway.accessor.MonitorRestAccessor</value>
-        <description>Specifies the class for the REST metrics
-            connector</description>
-    </property>
-
-    <property>
-        <name>monitor.rest.port</name>
-        <value>10005</value>
-    </property>
-
-    <property>
-        <name>monitor.rest.threads</name>
-        <value>5</value>
-    </property>
-
-    <property>
-        <name>monitor.rest.middle</name>
-        <value>/monitor/</value>
+        <name>gateway.worker.threads</name>
+        <value>10</value>
+        <description>Number of netty server worker threads</description>
     </property>
 
     <!-- Stream handles -->
-    <property>
-        <name>stream.rest.class</name>
-        <value>com.continuuity.gateway.collector.RestCollector</value>
-        <description>Specifies the class for the REST collector</description>
-    </property>
-
-    <property>
-        <name>stream.rest.port</name>
-        <value>10000</value>
-    </property>
-
-    <property>
-        <name>stream.rest.threads</name>
-        <value>20</value>
-    </property>
-
-    <property>
-        <name>stream.rest.middle</name>
-        <value>/stream/</value>
-    </property>
-
     <property>
         <name>stream.flume.class</name>
         <value>com.continuuity.gateway.collector.NettyFlumeCollector</value>
@@ -283,95 +168,45 @@
         <value>20</value>
     </property>
 
-    <!-- System stats handler -->
-    <property>
-        <name>systemstats.rest.class</name>
-        <value>com.continuuity.gateway.accessor.SystemStatsRestAccessor</value>
-        <description>Specifies the class for the REST system stats
-            connector</description>
-    </property>
-
-    <property>
-        <name>systemstats.rest.port</name>
-        <value>10006</value>
-    </property>
-
-    <property>
-        <name>systemstats.rest.threads</name>
-        <value>1</value>
-    </property>
-
-    <property>
-        <name>systemstats.rest.middle</name>
-        <value>/systemstats/</value>
-    </property>
-
     <!--
         Data Fabric configuration
     -->
     <property>
-        <name>data.local.jdbc</name>
-        <value>jdbc:hsqldb:file:data/fabricdb;user=sa</value>
-        <description>Specifies local file system implementation</description>
-    </property>
-
-    <property>
-        <name>data.local.hsqldb.cache_rows</name>
-        <value>64000</value>
-        <description>Specifies maximum number of rows of cached 
-            tables that are held in memory</description>
-    </property>
-
-    <property>
-        <name>data.local.hsqldb.cache_size</name>
-        <value>64000</value>
-        <description>Specifies total size (in kilobytes) of rows in 
-            memory cache used with cached tables</description>
-    </property>
-
-    <property>
-        <name>data.local.leveldb</name>
-        <value>data</value>
+        <name>data.local.storage</name>
+        <value>${local.data.dir}/ldb</value>
         <description>Specifies the database directory</description>
     </property>
 
     <property>
-        <name>data.local.leveldb.blocksize</name>
+        <name>data.local.storage.blocksize</name>
         <value>1024</value>
         <description>Specifies block size (in bytes)</description>
     </property>
 
     <property>
-        <name>data.local.leveldb.cachesize</name>
+        <name>data.local.storage.cachesize</name>
         <value>104857600</value>
         <description>Specifies cache size (in bytes)</description>
     </property>
 
     <property>
-        <name>hbase.zookeeper.quorum</name>
-        <value>localhost</value>
-        <description>Specifies the zookeeper ensemble for hbase,
-            as a comma-separated list of host:port,...</description>
-    </property>
-
-    <property>
-        <name>hbase.zookeeper.property.clientPort</name>
-        <value>62982</value>
-        <description>Specifies the zookeeper ensemble for hbase,
-            as a comma-separated list of host:port,...</description>
-    </property>
-
-    <property>
-        <name>data.opex.server.port</name>
+        <name>data.opex.bind.port</name>
         <value>15165</value>
         <description>The port number for the operation executor
             service</description>
     </property>
 
     <property>
-        <name>data.opex.server.address</name>
-        <value>localhost</value>
+        <name>data.opex.bind.address</name>
+        <value>127.0.0.1</value>
         <description>The inet address for the operation executor
+            service</description>
+    </property>
+
+    <property>
+        <name>data.opex.server.io.threads</name>
+        <value>2</value>
+        <description>The number of IO threads for the operation executor
             service</description>
     </property>
 
@@ -391,88 +226,43 @@
 
     <property>
         <name>data.opex.client.provider</name>
-        <!-- value>pool</value -->
         <value>thread-local</value>
         <description>The provider strategy for operation executor clients.
             Valid values are "pool" and "thread-local". </description>
     </property>
 
-    <!--
-        Overlord Metrics & Other overlord related configuration.
-    -->
     <property>
-        <name>overlord.metrics.collection.server.address</name>
-        <value>localhost</value>
-        <description>Specifies the server address for metrics
-            collection server.</description>
+        <name>data.queue.table.name</name>
+        <value>queues</value>
+        <description>Specifies the name of the table for queues.</description>
     </property>
 
     <property>
-        <name>overlord.metrics.collection.server.port</name>
-        <value>45003</value>
-        <description>Specifies the port on which metrics collection
-            server will run on.</description>
+        <name>data.tx.snapshot.dir</name>
+        <value>${hdfs.namespace}/tx.snapshot</value>
+        <description>Directory in HDFS used to store snapshots and logs of
+            transaction state.</description>
     </property>
 
     <property>
-        <name>ovelord.metrics.server.opentsdb.enabled</name>
-        <value>false</value>
-        <description>Specifies whether opentsdb for metric storage is
-            enabled or no.</description>
-    </property>
-
-    <property>
-        <name>overlord.metrics.frontend.server.address</name>
-        <value>localhost</value>
-        <description>Specifies the server address of metrics frontend
-            server</description>
-    </property>
-
-    <property>
-        <name>overlord.metrics.frontend.server.port</name>
-        <value>45002</value>
-        <description>Specifies the port on which frontend metrics server
-            is started on</description>
-    </property>
-
-    <property>
-        <name>overlord.metrics.connection.url</name>
-        <value>jdbc:hsqldb:file:data/metricsdb?user=sa</value>
-        <description>Specifies the connection string where metrics are stored
-            </description>
-    </property>
-
-    <property>
-        <name>opentsdb.server.address</name>
-        <value>localhost</value>
-        <description>Specifies the open TSDB server address.</description>
-    </property>
-
-    <property>
-        <name>opentsdb.server.port</name>
-        <value>4242</value>
-        <description>Specifies the port on which opentsdb will run.</description>
-    </property>
-
-    <property>
-        <name>overlord.metrics.timeseries.metrics</name>
-        <value>processed.count,busyness.count,dataops.count,emitted.count,stream.count,instance.count,flowlet.failure.count,tuples.attempt.read.count,tuples.read.count,query.success.count,query.failed.count</value>
-        <description>Specifies a comma seperate list of metrics that
-        need to be added to timeseries</description>
+        <name>data.tx.snapshot.interval</name>
+        <value>300</value>
+        <description>Frequency, in seconds, at which snapshots of transaction
+            state should be written.</description>
     </property>
 
     <!--
         Metadata service configuration
     -->
     <property>
-        <name>metadata.server.address</name>
-        <value>localhost</value>
+        <name>metadata.bind.address</name>
+        <value>127.0.0.1</value>
         <description>Specifies the server address of metadata
             server</description>
     </property>
 
     <property>
-        <name>metadata.server.port</name>
+        <name>metadata.bind.port</name>
         <value>45004</value>
         <description>Specifies the port on which metdata server
             is started on</description>
@@ -483,20 +273,34 @@
       Log collection service configuration
     -->
     <property>
-        <name>log.collection.server.address</name>
-        <value>localhost</value>
+        <name>log.query.bind.address</name>
+        <value>127.0.0.1</value>
+        <description>Specifies the server address of metrics frontend
+            server</description>
+    </property>
+
+    <property>
+        <name>log.query.bind.port</name>
+        <value>45002</value>
+        <description>Specifies the port on which frontend metrics server
+            is started on</description>
+    </property>
+
+    <property>
+        <name>log.collection.bind.address</name>
+        <value>127.0.0.1</value>
         <description>Specifies the hostname where the collection service runs</description>
     </property>
 
     <property>
-        <name>log.collection.port</name>
+        <name>log.collection.bind.port</name>
         <value>12157</value>
         <description>Port the log collection service runs on</description>
     </property>
 
     <property>
         <name>log.collection.root</name>
-        <value>data/logs</value>
+        <value>${local.data.dir}/logs</value>
         <description>Root location for collecting logs</description>
     </property>
 
@@ -505,7 +309,7 @@
     -->
     <property>
         <name>account.server.host</name>
-        <value>localhost</value>
+        <value>127.0.0.1</value>
         <description>Specifies the host for account server</description>
     </property>
 
@@ -517,20 +321,20 @@
 
     <!-- App Fabric related changes -->
     <property>
-        <name>app.server.port</name>
+        <name>app.bind.port</name>
         <value>45000</value>
         <description>App Fabric Server Port</description>
     </property>
 
     <property>
-        <name>app.server.address</name>
-        <value>localhost</value>
+        <name>app.bind.address</name>
+        <value>127.0.0.1</value>
         <description>Host address on which the app fabric server is started.</description>
     </property>
 
     <property>
         <name>app.output.dir</name>
-        <value>/tmp</value>
+        <value>/programs</value>
         <description>Directory where all archives are stored.</description>
     </property>
 
@@ -540,13 +344,21 @@
         <description>Directory temp.</description>
     </property>
 
-
-    <!-- UI Setting -->
+    <!--
+        Router configuration
+    -->
     <property>
-        <name>webapp.main</name>
-        <value>web-app/developer/server/main.js</value>
-        <description>Specifies location of the webapp's main.js file</description>
+        <name>router.bind.address</name>
+        <value>0.0.0.0</value>
+        <description>Specifies the address for router server to bind to</description>
     </property>
+
+    <property>
+        <name>router.bind.port</name>
+        <value>10000</value>
+        <description>Specifies the port the router server should bind to </description>
+    </property>
+
 
     <!-- Sets whether Devsuite is in Cloud or no -->
     <!-- AppFabric will become Reactor later -->
@@ -558,13 +370,13 @@
 
     <!-- New Metrics system settings -->
     <property>
-        <name>metrics.query.server.address</name>
-        <value>localhost</value>
+        <name>metrics.query.bind.address</name>
+        <value>127.0.0.1</value>
         <description>Host address where the metrics query server is started.</description>
     </property>
 
     <property>
-        <name>metrics.query.server.port</name>
+        <name>metrics.query.bind.port</name>
         <value>45005</value>
         <description>Port for metrics query server to listen on.</description>
     </property>
@@ -572,7 +384,13 @@
     <property>
         <name>metrics.data.table.retention.resolution.1.seconds</name>
         <value>7200</value>
-        <description>Retention hours for the resolution 1 sec table.</description>
+        <description>Retention resolution 1 sec table in seconds.</description>
+    </property>
+
+    <property>
+        <name>metrics.kafka.partition.size</name>
+        <value>10</value>
+        <description>Number of partitions for metrics topic</description>
     </property>
 
     <!--
@@ -580,13 +398,13 @@
     -->
     <property>
         <name>kafka.seed.brokers</name>
-        <value>localhost:9092</value>
+        <value>127.0.0.1:9092</value>
         <description>List of Kafka brokers (comma separated)</description>
     </property>
 
     <property>
         <name>log.publish.num.partitions</name>
-        <value>1</value>
+        <value>10</value>
         <description>Number of Kafka partitions to publish the logs to</description>
     </property>
 
@@ -609,6 +427,18 @@
     </property>
 
     <property>
+        <name>log.cleanup.run.interval.mins</name>
+        <value>1440</value>
+        <description>Interval at which to run log cleanup</description>
+    </property>
+
+    <property>
+        <name>log.saver.num.instances</name>
+        <value>1</value>
+        <description>Number of log saver instances to run in yarn</description>
+    </property>
+
+    <property>
         <name>log.file.rotation.interval.mins</name>
         <value>1440</value>
         <description>Log file rotation interval (for single node only)</description>
@@ -618,20 +448,20 @@
         Kafka Configuration
     -->
     <property>
-        <name>kafka.bind.hostname</name>
+        <name>kafka.bind.address</name>
         <value>0.0.0.0</value>
         <description>Kafka server hostname to bind to</description>
     </property>
 
     <property>
-        <name>kafka.port</name>
+        <name>kafka.bind.port</name>
         <value>9092</value>
         <description>Kafka server port</description>
     </property>
 
     <property>
         <name>kafka.num.partitions</name>
-        <value>1</value>
+        <value>10</value>
         <description>Default number of partitions for a topic</description>
     </property>
 
@@ -652,5 +482,41 @@
         <value>1</value>
         <description>Kafka replication factor</description>
     </property>
+
+    <!--
+        Global Configuration.
+    -->
+    <property>
+        <name>enable.unrecoverable.reset</name>
+        <value>false</value>
+        <description>
+            WARNING! - Enabling this option enables the deletion of all applications and data.
+            No recovery is possible!
+        </description>
+    </property>
+
+    <!---
+         Web App Settings.
+     -->
+    <property>
+        <name>dashboard.bind.address</name>
+        <value>0.0.0.0</value>
+    </property>
+
+    <property>
+        <name>dashboard.bind.port</name>
+        <value>9999</value>
+    </property>
+
+    <property>
+        <name>gateway.server.address</name>
+        <value>localhost</value>
+    </property>
+
+    <property>
+        <name>gateway.server.port</name>
+        <value>10000</value>
+    </property>
+
 
 </configuration>

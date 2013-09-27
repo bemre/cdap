@@ -12,7 +12,7 @@ import com.continuuity.common.conf.Constants;
 import com.continuuity.common.logging.common.LocalLogWriter;
 import com.continuuity.common.logging.common.LogWriter;
 import com.continuuity.internal.app.queue.QueueReaderFactory;
-import com.continuuity.internal.app.queue.SingleQueueReader;
+import com.continuuity.internal.app.queue.SingleQueue2Reader;
 import com.continuuity.internal.app.runtime.DataFabricFacade;
 import com.continuuity.internal.app.runtime.DataFabricFacadeFactory;
 import com.continuuity.internal.app.runtime.ProgramRunnerFactory;
@@ -22,6 +22,7 @@ import com.continuuity.internal.app.runtime.flow.FlowProgramRunner;
 import com.continuuity.internal.app.runtime.flow.FlowletProgramRunner;
 import com.continuuity.internal.app.runtime.procedure.ProcedureProgramRunner;
 import com.continuuity.internal.app.runtime.service.InMemoryProgramRuntimeService;
+import com.continuuity.internal.app.runtime.workflow.WorkflowProgramRunner;
 import com.continuuity.weave.api.ServiceAnnouncer;
 import com.continuuity.weave.common.Cancellable;
 import com.continuuity.weave.discovery.Discoverable;
@@ -66,6 +67,7 @@ final class InMemoryProgramRunnerModule extends PrivateModule {
     runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.FLOWLET).to(FlowletProgramRunner.class);
     runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.PROCEDURE).to(ProcedureProgramRunner.class);
     runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.MAPREDUCE).to(MapReduceProgramRunner.class);
+    runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.WORKFLOW).to(WorkflowProgramRunner.class);
 
     bind(ProgramRunnerFactory.class).to(InMemoryFlowProgramRunnerFactory.class).in(Scopes.SINGLETON);
     // Note: Expose for test cases. Need to refactor test cases.
@@ -89,7 +91,7 @@ final class InMemoryProgramRunnerModule extends PrivateModule {
 
     // For Binding queue stuff
     install(new FactoryModuleBuilder()
-            .implement(QueueReader.class, SingleQueueReader.class)
+            .implement(QueueReader.class, SingleQueue2Reader.class)
             .build(QueueReaderFactory.class));
   }
 
@@ -125,7 +127,7 @@ final class InMemoryProgramRunnerModule extends PrivateModule {
 
     @Inject
     private DiscoveryServiceAnnouncer(DiscoveryService discoveryService,
-                                      @Named(Constants.CFG_APP_FABRIC_SERVER_ADDRESS) InetAddress hostname) {
+                                      @Named(Constants.AppFabric.SERVER_ADDRESS) InetAddress hostname) {
       this.discoveryService = discoveryService;
       this.hostname = hostname;
     }

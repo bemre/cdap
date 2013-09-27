@@ -5,11 +5,15 @@
 package com.continuuity.internal.app;
 
 import com.continuuity.api.ApplicationSpecification;
+import com.continuuity.api.ResourceSpecification;
 import com.continuuity.api.batch.MapReduceSpecification;
 import com.continuuity.api.flow.FlowSpecification;
 import com.continuuity.api.flow.FlowletDefinition;
 import com.continuuity.api.flow.flowlet.FlowletSpecification;
 import com.continuuity.api.procedure.ProcedureSpecification;
+import com.continuuity.api.schedule.Schedule;
+import com.continuuity.api.workflow.WorkflowActionSpecification;
+import com.continuuity.api.workflow.WorkflowSpecification;
 import com.continuuity.internal.io.Schema;
 import com.continuuity.internal.io.SchemaGenerator;
 import com.continuuity.internal.io.SchemaTypeAdapter;
@@ -56,6 +60,10 @@ public final class ApplicationSpecificationAdapter {
                   .registerTypeAdapter(FlowletSpecification.class, new FlowletSpecificationCodec())
                   .registerTypeAdapter(ProcedureSpecification.class, new ProcedureSpecificationCodec())
                   .registerTypeAdapter(MapReduceSpecification.class, new MapReduceSpecificationCodec())
+                  .registerTypeAdapter(WorkflowSpecification.class, new WorkflowSpecificationCodec())
+                  .registerTypeAdapter(WorkflowActionSpecification.class, new WorkflowActionSpecificationCodec())
+                  .registerTypeAdapter(Schedule.class, new ScheduleCodec())
+                  .registerTypeAdapter(ResourceSpecification.class, new ResourceSpecificationCodec())
                   .registerTypeAdapterFactory(new AppSpecTypeAdapterFactory())
                   .create();
     return new ApplicationSpecificationAdapter(generator, gson);

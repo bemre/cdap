@@ -2,10 +2,10 @@ package com.continuuity.metadata;
 
 import com.continuuity.api.data.OperationException;
 import com.continuuity.common.conf.Constants;
-import com.continuuity.data.operation.ClearFabric;
+import com.continuuity.data.metadata.MetaDataStore;
 import com.continuuity.data.operation.OperationContext;
-import com.continuuity.data.operation.executor.OperationExecutor;
 import com.continuuity.data.runtime.DataFabricModules;
+import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
 import com.continuuity.metadata.thrift.Account;
 import com.continuuity.metadata.thrift.Application;
 import com.continuuity.metadata.thrift.Dataset;
@@ -46,8 +46,8 @@ public class MetadataServiceTest {
       new DataFabricModules().getInMemoryModules()
     );
     /* Instance of operation executor */
-    OperationExecutor opex = injector.getInstance(OperationExecutor.class);
-    mds = new MetadataService(opex);
+    injector.getInstance(InMemoryTransactionManager.class).init();
+    mds = new MetadataService(injector.getInstance(MetaDataStore.class));
     account = new Account("demo");
   }
 
@@ -57,10 +57,9 @@ public class MetadataServiceTest {
   }
 
   @Before
-  public void cleanDataFabric() throws OperationException {
-    // cleanups data
-    injector.getInstance(OperationExecutor.class)
-      .execute(new OperationContext(Constants.DEVELOPER_ACCOUNT_ID), new ClearFabric());
+  public void cleanMetaData() throws OperationException {
+    injector.getInstance(MetaDataStore.class).clear(
+      new OperationContext(Constants.DEVELOPER_ACCOUNT_ID), "demo", null);
   }
 
   /**
@@ -158,7 +157,7 @@ public class MetadataServiceTest {
       }
     }
     Account account1 = new Account("abc");
-    Assert.assertTrue(mds.getStreams(account1).size() == 0);
+    Assert.assertTrue(mds.getStreams(account1).isEmpty());
   }
 
   public void testCreateDataset() throws Exception {
@@ -179,7 +178,7 @@ public class MetadataServiceTest {
     Dataset dataset = new Dataset("dataset1");
     Assert.assertNotNull(mds.deleteDataset(account, dataset));
     List<Dataset> dlist = mds.getDatasets(account);
-    Assert.assertTrue(dlist.size() == 0);
+    Assert.assertTrue(dlist.isEmpty());
     Dataset dataset1 = mds.getDataset(account, dataset);
     Assert.assertNotNull(dataset1);
   }
@@ -202,7 +201,7 @@ public class MetadataServiceTest {
     Query query = new Query("query1", "appX");
     Assert.assertNotNull(mds.deleteQuery(account, query));
     List<Query> qlist = mds.getQueries(account);
-    Assert.assertTrue(qlist.size() == 0);
+    Assert.assertTrue(qlist.isEmpty());
     Query query1 = mds.getQuery(account, query);
     Assert.assertNotNull(query1);
   }
@@ -225,7 +224,7 @@ public class MetadataServiceTest {
     Mapreduce query = new Mapreduce("query1", "appX");
     Assert.assertNotNull(mds.deleteMapreduce(account, query));
     List<Mapreduce> qlist = mds.getMapreduces(account);
-    Assert.assertTrue(qlist.size() == 0);
+    Assert.assertTrue(qlist.isEmpty());
     Mapreduce query1 = mds.getMapreduce(account, query);
     Assert.assertNotNull(query1);
   }
@@ -245,7 +244,7 @@ public class MetadataServiceTest {
   }
 
   /**
-   * Tests update of a application
+   * Tests update of a application.
    * @throws Exception
    */
   @Test
@@ -315,7 +314,7 @@ public class MetadataServiceTest {
       }
     }
     Account account1 = new Account("abc");
-    Assert.assertTrue(mds.getApplications(account1).size() == 0);
+    Assert.assertTrue(mds.getApplications(account1).isEmpty());
   }
 
   /**

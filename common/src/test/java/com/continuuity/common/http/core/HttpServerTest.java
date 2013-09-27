@@ -7,12 +7,12 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.DefaultConnectionKeepAliveStrategy;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.jboss.netty.buffer.ChannelBufferInputStream;
 import org.jboss.netty.handler.codec.http.HttpRequest;
@@ -67,7 +67,7 @@ public class HttpServerTest {
 
   @Test
   public void testValidEndPoints() throws IOException {
-    String endPoint = String.format("http://localhost:%d/test/v1/resource", port);
+    String endPoint = String.format("http://localhost:%d/test/v1/resource?num=10", port);
     HttpGet get = new HttpGet(endPoint);
     HttpResponse response = request(get);
     assertEquals(200, response.getStatusLine().getStatusCode());
@@ -152,6 +152,60 @@ public class HttpServerTest {
     assertEquals(405, response.getStatusLine().getStatusCode());
   }
 
+  @Test
+  public void testKeepAlive() throws IOException {
+    String endPoint = String.format("http://localhost:%d/test/v1/tweets/1", port);
+    HttpPut put = new HttpPut(endPoint);
+    put.setEntity(new StringEntity("data"));
+    HttpResponse response = request(put, true);
+    assertEquals(200, response.getStatusLine().getStatusCode());
+    assertEquals("keep-alive", response.getFirstHeader("Connection").getValue());
+  }
+
+  @Test
+  public void testMultiplePathParameters() throws IOException {
+    String endPoint = String.format("http://localhost:%d/test/v1/user/sree/message/12", port);
+    HttpGet get = new HttpGet(endPoint);
+    HttpResponse response = request(get);
+    assertEquals(200, response.getStatusLine().getStatusCode());
+    String content = getResponseContent(response);
+    Gson gson = new Gson();
+    Map<String, String> map = gson.fromJson(content, Map.class);
+    assertEquals(1, map.size());
+    assertEquals("Handled multiple path parameters sree 12", map.get("result"));
+  }
+
+
+  //Test the end point where the parameter in path and order of declaration in method signature are different
+  @Test
+  public void testMultiplePathParametersWithParamterInDifferentOrder() throws IOException {
+    String endPoint = String.format("http://localhost:%d/test/v1/message/21/user/sree", port);
+    HttpGet get = new HttpGet(endPoint);
+    HttpResponse response = request(get);
+    assertEquals(200, response.getStatusLine().getStatusCode());
+    String content = getResponseContent(response);
+    Gson gson = new Gson();
+    Map<String, String> map = gson.fromJson(content, Map.class);
+    assertEquals(1, map.size());
+    assertEquals("Handled multiple path parameters sree 21", map.get("result"));
+  }
+
+  @Test
+  public void testNotRoutablePathParamMismatch() throws IOException {
+    String endPoint = String.format("http://localhost:%d/test/v1/NotRoutable/sree", port);
+    HttpGet get = new HttpGet(endPoint);
+    HttpResponse response = request(get);
+    assertEquals(500, response.getStatusLine().getStatusCode());
+  }
+
+  @Test
+  public void testNotRoutableMissingPathParam() throws IOException {
+    String endPoint = String.format("http://localhost:%d/test/v1/NotRoutable/sree/message/12", port);
+    HttpGet get = new HttpGet(endPoint);
+    HttpResponse response = request(get);
+    assertEquals(500, response.getStatusLine().getStatusCode());
+  }
+
   /**
    * Test handler.
    */
@@ -219,6 +273,44 @@ public class HttpServerTest {
       responder.sendJson(HttpResponseStatus.OK, object);
     }
 
+    @Path("/user/{userId}/message/{messageId}")
+    @GET
+    public void testMultipleParametersInPath(HttpRequest request, HttpResponder responder,
+                                             @PathParam("userId") String userId,
+                                             @PathParam("messageId") int messageId){
+      JsonObject object = new JsonObject();
+      object.addProperty("result", String.format("Handled multiple path parameters %s %d", userId, messageId));
+      responder.sendJson(HttpResponseStatus.OK, object);
+    }
+
+    @Path("/message/{messageId}/user/{userId}")
+    @GET
+    public void testMultipleParametersInDifferentParameterDeclarationOrder(HttpRequest request, HttpResponder responder,
+                                             @PathParam("userId") String userId,
+                                             @PathParam("messageId") int messageId){
+      JsonObject object = new JsonObject();
+      object.addProperty("result", String.format("Handled multiple path parameters %s %d", userId, messageId));
+      responder.sendJson(HttpResponseStatus.OK, object);
+    }
+
+    @Path("/NotRoutable/{id}")
+    @GET
+    public void notRoutableParameterMismatch(HttpRequest request,
+                                             HttpResponder responder, @PathParam("userid") String userId){
+      JsonObject object = new JsonObject();
+      object.addProperty("result", String.format("Handled Not routable path %s ", userId));
+      responder.sendJson(HttpResponseStatus.OK, object);
+    }
+
+    @Path("/NotRoutable/{userId}/message/{messageId}")
+    @GET
+    public void notRoutableMissingParameter(HttpRequest request, HttpResponder responder,
+                                            @PathParam("userId") String userId, String messageId){
+      JsonObject object = new JsonObject();
+      object.addProperty("result", String.format("Handled Not routable path %s ", userId));
+      responder.sendJson(HttpResponseStatus.OK, object);
+    }
+
     private String getStringContent(HttpRequest request) throws IOException {
       return IOUtils.toString(new ChannelBufferInputStream(request.getContent()));
     }
@@ -231,7 +323,15 @@ public class HttpServerTest {
   }
 
   private HttpResponse request(HttpUriRequest uri) throws IOException {
-    HttpClient client = new DefaultHttpClient();
+    return request(uri, false);
+  }
+
+  private HttpResponse request(HttpUriRequest uri, boolean keepalive) throws IOException {
+    DefaultHttpClient client = new DefaultHttpClient();
+
+    if (keepalive) {
+      client.setKeepAliveStrategy(new DefaultConnectionKeepAliveStrategy());
+    }
     HttpResponse response = client.execute(uri);
     return response;
   }

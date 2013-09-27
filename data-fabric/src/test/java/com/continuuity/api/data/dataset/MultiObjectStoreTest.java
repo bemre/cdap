@@ -9,6 +9,7 @@ import com.continuuity.api.data.batch.SplitReader;
 import com.continuuity.common.utils.ImmutablePair;
 import com.continuuity.data.dataset.DataSetInstantiator;
 import com.continuuity.data.dataset.DataSetTestBase;
+import com.continuuity.data2.transaction.TransactionContext;
 import com.continuuity.internal.io.UnsupportedTypeException;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -47,8 +48,6 @@ public class MultiObjectStoreTest extends DataSetTestBase {
 
     setupInstantiator(Lists.newArrayList(stringStore, pairStore, customStore, innerStore,
                                          batchStore, intStore, multiStringStore, batchTestsMultiCol));
-    // this test runs all operations synchronously
-    newTransaction(Mode.Sync);
   }
 
   @Test
@@ -87,7 +86,7 @@ public class MultiObjectStoreTest extends DataSetTestBase {
     multiStringStore.write(a, col3, string3);
     multiStringStore.write(a, col4, string4);
 
-    List<String> result = multiStringStore.readAll(a);
+    Map<byte[], String> result = multiStringStore.readAll(a);
     Assert.assertEquals(4, result.size());
   }
 
@@ -117,6 +116,9 @@ public class MultiObjectStoreTest extends DataSetTestBase {
   public void testInstantiateWrongClass() throws Exception {
     // note: due to type erasure, this succeeds
     MultiObjectStore<Custom> store = instantiator.getDataSet("pairs");
+    MultiObjectStore<ImmutablePair<Integer, String>> pairStore = instantiator.getDataSet("pairs");
+    TransactionContext txContext = newTransaction();
+
     // but now it must fail with incompatible type
     Custom custom = new Custom(42, Lists.newArrayList("one", "two"));
     try {
@@ -128,13 +130,14 @@ public class MultiObjectStoreTest extends DataSetTestBase {
       }
     }
     // write a correct object to the pair store
-    MultiObjectStore<ImmutablePair<Integer, String>> pairStore = instantiator.getDataSet("pairs");
     ImmutablePair<Integer, String> pair = new ImmutablePair<Integer, String>(1, "second");
     pairStore.write(a, pair); // should succeed
+    commitTransaction(txContext);
     // now try to read that as a custom object, should fail with class cast
+    txContext = newTransaction();
     try {
       custom = store.read(a);
-      Assert.fail("write should have failed with class cast exception");
+      Assert.fail("read should have failed with class cast exception");
     } catch (ClassCastException e) {
       // only this exception is expected (read will return a pair, but the assignment implicitly casts).
     }
@@ -170,7 +173,7 @@ public class MultiObjectStoreTest extends DataSetTestBase {
       }
     };
     // create an instantiator that uses the dummy class loader
-    DataSetInstantiator inst = new DataSetInstantiator(fabric, PROXY, loader);
+    DataSetInstantiator inst = new DataSetInstantiator(fabric, loader);
     inst.setDataSets(specs);
     // use that instantiator to get a data set instance
     inst.getDataSet("customs");
@@ -179,11 +182,11 @@ public class MultiObjectStoreTest extends DataSetTestBase {
   }
 
   @Test
-  public void testBatchReads() throws OperationException, InterruptedException {
+  public void testBatchReads() throws Exception {
     MultiObjectStore<String> t = instantiator.getDataSet("batch");
 
     // start a transaction
-    newTransaction(DataSetTestBase.Mode.Smart);
+    TransactionContext txContext = newTransaction();
     // write 1000 random values to the table and remember them in a set
     SortedSet<Long> keysWritten = Sets.newTreeSet();
     Random rand = new Random(451);
@@ -194,24 +197,28 @@ public class MultiObjectStoreTest extends DataSetTestBase {
       keysWritten.add(keyLong);
     }
     // commit transaction
-    commitTransaction();
+    commitTransaction(txContext);
 
     // start a sync transaction
-    newTransaction(DataSetTestBase.Mode.Sync);
+    txContext = newTransaction();
     // get the splits for the table
     List<Split> splits = t.getSplits();
     // read each split and verify the keys
     SortedSet<Long> keysToVerify = Sets.newTreeSet(keysWritten);
     verifySplits(t, splits, keysToVerify);
 
+    commitTransaction(txContext);
+
     // start a sync transaction
-    newTransaction(DataSetTestBase.Mode.Sync);
+    txContext = newTransaction();
     // get specific number of splits for a subrange
     keysToVerify = Sets.newTreeSet(keysWritten.subSet(0x10000000L, 0x40000000L));
     splits = t.getSplits(5, Bytes.toBytes(0x10000000L), Bytes.toBytes(0x40000000L));
     Assert.assertTrue(splits.size() <= 5);
     // read each split and verify the keys
     verifySplits(t, splits, keysToVerify);
+
+    commitTransaction(txContext);
   }
 
   // helper to verify that the split readers for the given splits return exactly a set of keys
@@ -240,13 +247,13 @@ public class MultiObjectStoreTest extends DataSetTestBase {
 
 
   @Test
-  public void testBatchReadMultipleColumns() throws OperationException, InterruptedException {
+  public void testBatchReadMultipleColumns() throws Exception {
     MultiObjectStore<String> t = instantiator.getDataSet("batchTestsMultiCol");
     byte [] col1 = Bytes.toBytes("c1");
     byte [] col2 = Bytes.toBytes("c2");
 
     // start a transaction
-    newTransaction(DataSetTestBase.Mode.Smart);
+    TransactionContext txContext = newTransaction();
     // write 1000 random values to the table and remember them in a set
     SortedSet<Integer> keysWritten = Sets.newTreeSet();
     Random rand = new Random(451);
@@ -260,13 +267,10 @@ public class MultiObjectStoreTest extends DataSetTestBase {
       keysWritten.add(keyInt);
     }
     // commit transaction
-    commitTransaction();
-
-    // commit transaction
-    commitTransaction();
+    commitTransaction(txContext);
 
     // start a sync transaction
-    newTransaction(DataSetTestBase.Mode.Sync);
+    txContext = newTransaction();
     // get the splits for the table
     List<Split> splits = t.getSplits();
     // read each split and verify the keys
@@ -288,6 +292,8 @@ public class MultiObjectStoreTest extends DataSetTestBase {
         Assert.assertTrue(keysToVerify.remove(Bytes.toInt(key)));
       }
     }
+
+    commitTransaction(txContext);
 
   }
 

@@ -1,6 +1,6 @@
 package com.continuuity.internal.asm;
 
-import com.continuuity.archive.MultiClassLoader;
+import com.continuuity.common.lang.MultiClassLoader;
 import com.google.common.collect.Maps;
 
 import java.util.Map;
@@ -11,7 +11,7 @@ import java.util.Map;
 public class ByteCodeClassLoader extends MultiClassLoader {
 
   /**
-   * Map from class name to bytecode
+   * Map from class name to bytecode.
    */
   protected final Map<String, byte[]> bytecodes;
 

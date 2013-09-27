@@ -29,16 +29,16 @@ public class GatewayModules extends RuntimeModule {
         bind(Consumer.class).to(StreamEventWritingConsumer.class);
       }
     };
-  }
+}
 
   @Override
   public Module getSingleNodeModules() {
-    return new AbstractModule() {
-      @Override
-      protected void configure() {
-        bind(Consumer.class).to(StreamEventWritingConsumer.class);
-      }
-    };
+  return new AbstractModule() {
+    @Override
+    protected void configure() {
+      bind(Consumer.class).to(StreamEventWritingConsumer.class);
+    }
+  };
   }
 
   @Override

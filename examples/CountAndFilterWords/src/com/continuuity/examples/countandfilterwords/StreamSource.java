@@ -17,10 +17,12 @@
 
 package com.continuuity.examples.countandfilterwords;
 
+import com.continuuity.api.annotation.ProcessInput;
 import com.continuuity.api.common.Bytes;
 import com.continuuity.api.flow.flowlet.AbstractFlowlet;
 import com.continuuity.api.flow.flowlet.OutputEmitter;
 import com.continuuity.api.flow.flowlet.StreamEvent;
+import com.continuuity.api.metrics.Metrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -31,7 +33,9 @@ public class StreamSource extends AbstractFlowlet {
   private static final Logger LOG = LoggerFactory.getLogger(StreamSource
                                                               .class);
   private OutputEmitter<String> output;
+  private Metrics metric;
 
+  @ProcessInput
   public void process(StreamEvent event) {
     LOG.debug(this.getContext().getName() + ": Received event " + event);
 
@@ -40,6 +44,7 @@ public class StreamSource extends AbstractFlowlet {
 
     LOG.debug(this.getContext().getName() + ": Emitting " + line);
 
+    metric.count("input.events", 1);
     output.emit(line);
   }
 }

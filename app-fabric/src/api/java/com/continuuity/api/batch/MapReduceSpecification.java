@@ -1,5 +1,6 @@
 package com.continuuity.api.batch;
 
+import com.continuuity.api.ProgramSpecification;
 import com.continuuity.internal.batch.DefaultMapReduceSpecification;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
@@ -9,7 +10,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * This class provides a specification of a mapreduce job. Instances of this class should be created via {@link Builder}
+ * This class provides a specification of a MapReduce job. Instances of this class should be created via {@link Builder}
  * class by invoking the {@link Builder#with()} method.
  * <p>
  *   Example:
@@ -26,22 +27,7 @@ import java.util.Set;
  * </pre>
  * </p>
  */
-public interface MapReduceSpecification {
-
-  /**
-   * @return Class name of the {@link MapReduce} class.
-   */
-  String getClassName();
-
-  /**
-   * @return Name of the {@link MapReduce}
-   */
-  String getName();
-
-  /**
-   * @return Description to be associated with {@link MapReduce}
-   */
-  String getDescription();
+public interface MapReduceSpecification extends ProgramSpecification {
 
   /**
    * @return An immutable set of {@link com.continuuity.api.data.DataSet DataSets} that
@@ -68,6 +54,16 @@ public interface MapReduceSpecification {
   String getInputDataSet();
 
   /**
+   * @return memory in MB to give to each mapper
+   */
+  int getMapperMemoryMB();
+
+  /**
+   * @return memory in MB to give to each reducer
+   */
+  int getReducerMemoryMB();
+
+  /**
    * Builder for building {@link MapReduceSpecification}.
    */
   static final class Builder {
@@ -77,6 +73,8 @@ public interface MapReduceSpecification {
     private String outputDataSet;
     private Map<String, String> arguments;
     private final ImmutableSet.Builder<String> dataSets = ImmutableSet.builder();
+    private int mapperMemoryMB = 1024;
+    private int reducerMemoryMB = 1024;
 
     /**
      * Starts defining {@link MapReduceSpecification}.
@@ -93,7 +91,7 @@ public interface MapReduceSpecification {
 
       /**
        * Sets the name of the {@link MapReduce}.
-       * @param name of the mapreduce job.
+       * @param name Name of the mapreduce job.
        * @return instance of this {@link Builder}
        */
       public DescriptionSetter setName(String name) {
@@ -147,7 +145,7 @@ public interface MapReduceSpecification {
        *   {@link MapReduceContext#setInput(com.continuuity.api.data.batch.BatchReadable, java.util.List)} in
        *   {@link MapReduce#beforeSubmit(MapReduceContext)}.
        * </p>
-       * @param dataSet name of the dataset
+       * @param dataSet Name of the dataset
        * @return an instance of {@link AfterDescription}
        */
       public AfterDescription useInputDataSet(String dataSet) {
@@ -159,7 +157,7 @@ public interface MapReduceSpecification {
       /**
        * Specifies which dataset to use as an output destination of mapreduce job. Automatically adds dataset to the
        * list of datasets used by this job. I.e. no need to add it with {@link #useDataSet(String, String...)} again.
-       * @param dataSet name of the dataset
+       * @param dataSet Name of the dataset
        * @return an instance of {@link AfterDescription}
        */
       public AfterDescription useOutputDataSet(String dataSet) {
@@ -180,12 +178,22 @@ public interface MapReduceSpecification {
         return this;
       }
 
+      public AfterDescription setMapperMemoryMB(int memory) {
+        mapperMemoryMB = memory;
+        return this;
+      }
+
+      public AfterDescription setReducerMemoryMB(int memory) {
+        reducerMemoryMB = memory;
+        return this;
+      }
+
       /**
        * @return build a {@link MapReduceSpecification}
        */
       public MapReduceSpecification build() {
         return new DefaultMapReduceSpecification(name, description, inputDataSet, outputDataSet,
-                                                    dataSets.build(), arguments);
+                                                 dataSets.build(), arguments, mapperMemoryMB, reducerMemoryMB);
       }
     }
 

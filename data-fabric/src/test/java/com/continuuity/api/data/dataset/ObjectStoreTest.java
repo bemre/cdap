@@ -9,6 +9,7 @@ import com.continuuity.api.data.batch.SplitReader;
 import com.continuuity.common.utils.ImmutablePair;
 import com.continuuity.data.dataset.DataSetInstantiator;
 import com.continuuity.data.dataset.DataSetTestBase;
+import com.continuuity.data2.transaction.TransactionContext;
 import com.continuuity.internal.io.UnsupportedTypeException;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -18,6 +19,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.SortedSet;
@@ -36,13 +38,16 @@ public class ObjectStoreTest extends DataSetTestBase {
     DataSet pairStore = new ObjectStore<ImmutablePair<Integer, String>>(
       "pairs", new TypeToken<ImmutablePair<Integer, String>>(){}.getType());
     DataSet customStore = new ObjectStore<Custom>("customs", Custom.class);
+    DataSet customListStore = new ObjectStore<List<Custom>>("customlist",
+                              new TypeToken<List<Custom>>(){}.getType());
     DataSet innerStore = new ObjectStore<CustomWithInner.Inner<Integer>>(
       "inners", new TypeToken<CustomWithInner.Inner<Integer>>(){}.getType());
     DataSet batchStore = new ObjectStore<String>("batch", String.class);
     DataSet intStore = new IntegerStore("ints");
-    setupInstantiator(Lists.newArrayList(stringStore, pairStore, customStore, innerStore, batchStore, intStore));
+    setupInstantiator(Lists.newArrayList(stringStore, pairStore, customStore,
+                                         customListStore, innerStore, batchStore, intStore));
     // this test runs all operations synchronously
-    newTransaction(Mode.Sync);
+    TransactionContext txContext = newTransaction();
   }
 
   @Test
@@ -89,6 +94,7 @@ public class ObjectStoreTest extends DataSetTestBase {
   public void testInstantiateWrongClass() throws Exception {
     // note: due to type erasure, this succeeds
     ObjectStore<Custom> store = instantiator.getDataSet("pairs");
+    TransactionContext txContext = newTransaction();
     // but now it must fail with incompatible type
     Custom custom = new Custom(42, Lists.newArrayList("one", "two"));
     try {
@@ -101,9 +107,14 @@ public class ObjectStoreTest extends DataSetTestBase {
     }
     // write a correct object to the pair store
     ObjectStore<ImmutablePair<Integer, String>> pairStore = instantiator.getDataSet("pairs");
+    txContext = newTransaction();
     ImmutablePair<Integer, String> pair = new ImmutablePair<Integer, String>(1, "second");
     pairStore.write(a, pair); // should succeed
+    commitTransaction(txContext);
+
     // now try to read that as a custom object, should fail with class cast
+    store = instantiator.getDataSet("pairs");
+    txContext = newTransaction();
     try {
       custom = store.read(a);
       Assert.fail("write should have failed with class cast exception");
@@ -142,7 +153,7 @@ public class ObjectStoreTest extends DataSetTestBase {
       }
     };
     // create an instantiator that uses the dummy class loader
-    DataSetInstantiator inst = new DataSetInstantiator(fabric, PROXY, loader);
+    DataSetInstantiator inst = new DataSetInstantiator(fabric, loader);
     inst.setDataSets(specs);
     // use that instantiator to get a data set instance
     inst.getDataSet("customs");
@@ -151,11 +162,57 @@ public class ObjectStoreTest extends DataSetTestBase {
   }
 
   @Test
-  public void testBatchReads() throws OperationException, InterruptedException {
+  public void testBatchCustomList() throws Exception {
+    ObjectStore<List<Custom>> customStore = instantiator.getDataSet("customlist");
+
+    TransactionContext txContext = newTransaction();
+
+    SortedSet<Long> keysWritten = Sets.newTreeSet();
+
+    List<Custom> customList1 = Arrays.asList(new Custom(1, Lists.newArrayList("one", "ONE")),
+                                            new Custom(2, Lists.newArrayList("two", "TWO")));
+    Random rand = new Random(100);
+    long key1 = rand.nextLong();
+    keysWritten.add(key1);
+
+    customStore.write(Bytes.toBytes(key1), customList1);
+
+    List<Custom> customList2 = Arrays.asList(new Custom(3, Lists.newArrayList("three", "THREE")),
+                                             new Custom(4, Lists.newArrayList("four", "FOUR")));
+    long key2 = rand.nextLong();
+    keysWritten.add(key2);
+
+    customStore.write(Bytes.toBytes(key2), customList2);
+
+    // commit transaction
+    commitTransaction(txContext);
+    // start a sync transaction
+    txContext = newTransaction();
+
+    // get the splits for the table
+    List<Split> splits = customStore.getSplits();
+
+    for (Split split : splits) {
+      SplitReader<byte[], List<Custom>> reader = customStore.createSplitReader(split);
+      reader.initialize(split);
+      while (reader.nextKeyValue()) {
+        byte[] key = reader.getCurrentKey();
+        Assert.assertTrue(keysWritten.remove(Bytes.toLong(key)));
+      }
+    }
+    // verify all keys have been read
+    if (!keysWritten.isEmpty()) {
+      System.out.println("Remaining [" + keysWritten.size() + "]: " + keysWritten);
+    }
+    Assert.assertTrue(keysWritten.isEmpty());
+  }
+
+  @Test
+  public void testBatchReads() throws Exception {
     ObjectStore<String> t = instantiator.getDataSet("batch");
 
     // start a transaction
-    newTransaction(DataSetTestBase.Mode.Smart);
+    TransactionContext txContext = newTransaction();
     // write 1000 random values to the table and remember them in a set
     SortedSet<Long> keysWritten = Sets.newTreeSet();
     Random rand = new Random(451);
@@ -166,10 +223,10 @@ public class ObjectStoreTest extends DataSetTestBase {
       keysWritten.add(keyLong);
     }
     // commit transaction
-    commitTransaction();
+    commitTransaction(txContext);
 
     // start a sync transaction
-    newTransaction(DataSetTestBase.Mode.Sync);
+    txContext = newTransaction();
     // get the splits for the table
     List<Split> splits = t.getSplits();
     // read each split and verify the keys
@@ -177,7 +234,7 @@ public class ObjectStoreTest extends DataSetTestBase {
     verifySplits(t, splits, keysToVerify);
 
     // start a sync transaction
-    newTransaction(DataSetTestBase.Mode.Sync);
+    txContext = newTransaction();
     // get specific number of splits for a subrange
     keysToVerify = Sets.newTreeSet(keysWritten.subSet(0x10000000L, 0x40000000L));
     splits = t.getSplits(5, Bytes.toBytes(0x10000000L), Bytes.toBytes(0x40000000L));

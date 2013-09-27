@@ -1,11 +1,11 @@
 package com.continuuity.test.app;
 
 import com.continuuity.api.data.OperationException;
-import com.continuuity.test.AppFabricTestBase;
 import com.continuuity.test.ApplicationManager;
 import com.continuuity.test.MapReduceManager;
 import com.continuuity.test.ProcedureClient;
 import com.continuuity.test.ProcedureManager;
+import com.continuuity.test.ReactorTestBase;
 import com.continuuity.test.RuntimeMetrics;
 import com.continuuity.test.RuntimeStats;
 import com.continuuity.test.StreamWriter;
@@ -27,9 +27,9 @@ import java.util.concurrent.TimeoutException;
 /**
  *
  */
-public class TestFrameworkTest extends AppFabricTestBase {
+public class TestFrameworkTest extends ReactorTestBase {
 
-  @Test
+  @Test(timeout = 240000)
   public void testMultiInput() throws InterruptedException, IOException, TimeoutException {
     ApplicationManager applicationManager = deployApplication(JoinMultiStreamApp.class);
     try {
@@ -62,11 +62,15 @@ public class TestFrameworkTest extends AppFabricTestBase {
 
     } finally {
       applicationManager.stopAll();
-      clearAppFabric();
+      // Sleep a second before clear. There is a race between removal of RuntimeInfo
+      // in the AbstractProgramRuntimeService class and the clear() method, which loops all RuntimeInfo.
+      // The reason for the race is because removal is done through callback.
+      TimeUnit.SECONDS.sleep(1);
+      clear();
     }
   }
 
-  @Test
+  @Test(timeout = 360000)
   public void testApp() throws InterruptedException, IOException, TimeoutException, OperationException {
     ApplicationManager applicationManager = deployApplication(WordCountApp2.class);
 
@@ -101,16 +105,17 @@ public class TestFrameworkTest extends AppFabricTestBase {
 
       // Verify by looking into dataset
       MyKeyValueTable mydataset = applicationManager.getDataSet("mydataset");
+
       Assert.assertEquals(100L, Longs.fromByteArray(mydataset.read("title:title".getBytes(Charsets.UTF_8))));
 
       // check the metrics
       RuntimeMetrics procedureMetrics = RuntimeStats.getProcedureMetrics("WordCountApp", "WordFrequency");
-      procedureMetrics.waitForProcessed(1, 1, TimeUnit.SECONDS);
+      procedureMetrics.waitForProcessed(1, 5, TimeUnit.SECONDS);
       Assert.assertEquals(0L, procedureMetrics.getException());
 
       // Run mapreduce job
       MapReduceManager mrManager = applicationManager.startMapReduce("countTotal");
-      mrManager.waitForFinish(15L, TimeUnit.SECONDS);
+      mrManager.waitForFinish(120L, TimeUnit.SECONDS);
 
       long totalCount = Long.valueOf(procedureClient.query("total", Collections.<String, String>emptyMap()));
       // every event has 5 tokens
@@ -118,7 +123,8 @@ public class TestFrameworkTest extends AppFabricTestBase {
 
     } finally {
       applicationManager.stopAll();
-      clearAppFabric();
+      TimeUnit.SECONDS.sleep(1);
+      clear();
     }
   }
 
@@ -144,7 +150,8 @@ public class TestFrameworkTest extends AppFabricTestBase {
 
     } finally {
       applicationManager.stopAll();
-      clearAppFabric();
+      TimeUnit.SECONDS.sleep(1);
+      clear();
     }
   }
 }

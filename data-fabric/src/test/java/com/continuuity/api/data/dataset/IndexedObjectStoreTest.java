@@ -3,9 +3,10 @@ package com.continuuity.api.data.dataset;
 import com.continuuity.api.common.Bytes;
 import com.continuuity.api.data.DataSet;
 import com.continuuity.data.dataset.DataSetTestBase;
+import com.continuuity.data2.transaction.TransactionContext;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-import junit.framework.Assert;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -31,7 +32,7 @@ public class IndexedObjectStoreTest extends DataSetTestBase {
   public void testLookupByIndex() throws Exception{
 
     indexedFeed = instantiator.getDataSet("index");
-    newTransaction(Mode.Sync);
+    TransactionContext txContext = newTransaction();
 
     List<String> categories1 = ImmutableList.of("racing", "tech");
     List<String> categories2 = ImmutableList.of("electronics", "tech");
@@ -53,13 +54,15 @@ public class IndexedObjectStoreTest extends DataSetTestBase {
 
     List<Feed> feedResult3 = indexedFeed.readAllByIndex(Bytes.toBytes("tech"));
     Assert.assertEquals(2, feedResult3.size());
+
+    commitTransaction(txContext);
   }
 
   @Test
   public void testIndexRewrites() throws Exception {
 
     indexedFeed = instantiator.getDataSet("index");
-    newTransaction(Mode.Sync);
+    TransactionContext txContext = newTransaction();
 
     List<String> categories1 = ImmutableList.of("big data", "startup");
     List<String> categories2 = ImmutableList.of("hadoop");
@@ -87,13 +90,15 @@ public class IndexedObjectStoreTest extends DataSetTestBase {
     indexedFeed.write(key1, feed1);
     feedResult = indexedFeed.readAllByIndex(Bytes.toBytes("hadoop"));
     Assert.assertEquals(0, feedResult.size());
+
+    commitTransaction(txContext);
   }
 
   @Test
   public void testIndexPruning() throws Exception{
 
     indexedFeed = instantiator.getDataSet("index");
-    newTransaction(Mode.Sync);
+    TransactionContext txContext = newTransaction();
 
     List<String> categories = ImmutableList.of("running", "marathon", "drinking");
     Feed feed =  new Feed("rocknroll", "http://rock'n'roll.com", categories);
@@ -108,12 +113,41 @@ public class IndexedObjectStoreTest extends DataSetTestBase {
     feeds = indexedFeed.readAllByIndex(Bytes.toBytes("drinking"));
     Assert.assertEquals(0, feeds.size());
 
+    commitTransaction(txContext);
+  }
+
+  @Test
+  public void testIndexNoSecondaryKeyChanges() throws Exception {
+    indexedFeed = instantiator.getDataSet("index");
+    List<String> categories = ImmutableList.of("C++", "C#");
+
+    Feed feed1 =  new Feed("MSFT", "http://microwsoft.com", categories);
+    byte[] key1 = Bytes.toBytes(feed1.getId());
+
+    indexedFeed.write(key1, feed1, getCategories(categories));
+
+    List<Feed> feedResult = indexedFeed.readAllByIndex(Bytes.toBytes("C++"));
+    Assert.assertEquals(1, feedResult.size());
+
+    // re-write f1 with updated url but same id
+    Feed feed2 = new Feed("MSFT", "http://microsoft.com", categories);
+    indexedFeed.write(key1, feed2, getCategories(categories));
+
+    //Should be still be able to look up by secondary indices
+
+    feedResult = indexedFeed.readAllByIndex(Bytes.toBytes("C++"));
+    Assert.assertEquals(1, feedResult.size());
+
+    feedResult = indexedFeed.readAllByIndex(Bytes.toBytes("C#"));
+    Assert.assertEquals(1, feedResult.size());
+
+    Assert.assertEquals("http://microsoft.com", feedResult.get(0).getUrl());
   }
 
   @Test
   public void testIndexUpdates() throws Exception {
     indexedFeed = instantiator.getDataSet("index");
-    newTransaction(Mode.Sync);
+    TransactionContext txContext = newTransaction();
 
     List<String> categories1 = ImmutableList.of("big data");
 
@@ -129,6 +163,8 @@ public class IndexedObjectStoreTest extends DataSetTestBase {
 
     feedResult = indexedFeed.readAllByIndex(Bytes.toBytes("startup"));
     Assert.assertEquals(1, feedResult.size());
+
+    commitTransaction(txContext);
   }
 
 

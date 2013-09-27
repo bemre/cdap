@@ -14,11 +14,14 @@ dependencies {
     apiCompile elastic([group: 'com.continuuity', name: 'common', classifier: 'api', version: "${version}", changing: true], "common")
 
     compile libraries.slf4j_api
+    compile libraries.fastutil
     compile libraries.logback_core
     compile libraries.logback_classic
     compile libraries.google_guice
+    compile libraries.google_guice_assistedinject
     compile libraries.leveldb
     compile libraries.jsr_305
+    compile libraries.weave_core
 
     testCompile libraries.mockito_core
     testCompile libraries.junit
@@ -27,7 +30,6 @@ dependencies {
     apiCompile libraries.netty
     apiCompile libraries.jsr_305
 
-    compile libraries.kryo
     compile libraries.hsql
     compile libraries.jcl_over_slf4j
 
@@ -67,6 +69,7 @@ test {
 checkstyleMain {
     source = sourceSets.main.allJava.matching {
         exclude '**/stubs/**/*'
+        exclude '**/thrift/**'
     }
 }
 
@@ -74,3 +77,11 @@ checkstyleMain {
  * Exclude any config xml from jar task
  */
 jar.exclude '*.xml'
+
+/**
+ * Use io.netty instead of org.jboss.netty
+ */
+configurations {
+    all*.exclude group: 'org.jboss.netty', module: 'netty'
+    all*.exclude group: 'asm', module: 'asm'
+}

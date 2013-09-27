@@ -19,6 +19,9 @@ public class NoopGateway {
    */
   public static void main(String[] args) {
 
+    // Load our configuration from our resource files
+    CConfiguration configuration = CConfiguration.create();
+
     // Set up our Guice injections
     Injector injector = Guice.createInjector(
       new GatewayModules().getNoopModules(),
@@ -29,9 +32,6 @@ public class NoopGateway {
 
     // Now, initialize the Gateway
     try {
-
-      // Load our configuration from our resource files
-      CConfiguration configuration = CConfiguration.create();
 
       // Start the gateway!
       theGateway.start(null, configuration);
