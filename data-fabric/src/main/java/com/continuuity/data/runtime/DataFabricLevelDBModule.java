@@ -7,10 +7,9 @@ import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.conf.Constants;
 import com.continuuity.data.DataSetAccessor;
 import com.continuuity.data.LocalDataSetAccessor;
-import com.continuuity.data.metadata.MetaDataStore;
-import com.continuuity.data.metadata.SerializingMetaDataStore;
-import com.continuuity.data.operation.executor.OperationExecutor;
-import com.continuuity.data.operation.executor.omid.OmidTransactionalOperationExecutor;
+import com.continuuity.metadata.MetaDataStore;
+import com.continuuity.metadata.MetaDataTable;
+import com.continuuity.metadata.SerializingMetaDataTable;
 import com.continuuity.data2.dataset.lib.table.leveldb.LevelDBOcTableService;
 import com.continuuity.data2.queue.QueueClientFactory;
 import com.continuuity.data2.transaction.DefaultTransactionExecutor;
@@ -64,13 +63,9 @@ public class DataFabricLevelDBModule extends AbstractModule {
   @Override
   public void configure() {
 
-    // Bind our implementations
-
-    // This is the primary mapping of the data fabric to underlying storage
-    bind(OperationExecutor.class).to(OmidTransactionalOperationExecutor.class).in(Singleton.class);
-
     // bind meta data store
-    bind(MetaDataStore.class).to(SerializingMetaDataStore.class).in(Singleton.class);
+    bind(MetaDataTable.class).to(SerializingMetaDataTable.class).in(Singleton.class);
+    bind(MetaDataStore.class).in(Singleton.class);
 
     // Bind TxDs2 stuff
     bind(LevelDBOcTableService.class).toInstance(LevelDBOcTableService.getInstance());
@@ -78,6 +73,8 @@ public class DataFabricLevelDBModule extends AbstractModule {
     bind(InMemoryTransactionManager.class).in(Singleton.class);
     bind(TransactionSystemClient.class).to(InMemoryTxSystemClient.class).in(Singleton.class);
     bind(CConfiguration.class).annotatedWith(Names.named("LevelDBConfiguration")).toInstance(conf);
+    bind(CConfiguration.class).annotatedWith(Names.named("DataSetAccessorConfig")).toInstance(conf);
+    bind(CConfiguration.class).annotatedWith(Names.named("TransactionServerConfig")).toInstance(conf);
     bind(DataSetAccessor.class).to(LocalDataSetAccessor.class).in(Singleton.class);
     bind(QueueClientFactory.class).to(LevelDBAndInMemoryQueueClientFactory.class).in(Singleton.class);
     bind(QueueAdmin.class).to(LevelDBAndInMemoryQueueAdmin.class).in(Singleton.class);
@@ -87,7 +84,7 @@ public class DataFabricLevelDBModule extends AbstractModule {
               .build(TransactionExecutorFactory.class));
 
     bind(CConfiguration.class)
-      .annotatedWith(Names.named("DataFabricOperationExecutorConfig"))
+      .annotatedWith(Names.named("DataSetAccessorConfig"))
       .toInstance(conf);
   }
 }
