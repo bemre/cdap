@@ -6,16 +6,18 @@ define([], function () {
 
   var DASH_CHART_COUNT = 60;
 
+  var MEGABYTES = 1024 * 1024;
+
   var Controller = Em.Controller.extend({
 
     structure: { text: 'Root', children: Em.ArrayProxy.create({ content: [] }) },
     elements: Em.Object.create(),
 
-    __remaining: -1,
-
     currents: Em.Object.create(),
     timeseries: Em.Object.create(),
+
     value: Em.Object.create(),
+    total: Em.Object.create(),
 
     load: function () {
 
@@ -36,101 +38,122 @@ define([], function () {
       this.set('elements.App', Em.ArrayProxy.create({ content: [] }));
       this.set('elements.Flow', Em.ArrayProxy.create({ content: [] }));
       this.set('elements.Flowlet', Em.ArrayProxy.create({ content: [] }));
-      this.set('elements.Batch', Em.ArrayProxy.create({ content: [] }));
+      this.set('elements.Mapreduce', Em.ArrayProxy.create({ content: [] }));
       this.set('elements.Workflow', Em.ArrayProxy.create({ content: [] }));
       this.set('elements.Procedure', Em.ArrayProxy.create({ content: [] }));
 
-      this.HTTP.rest('apps', function (objects) {
+      var now = new Date().getTime();
+      var start = now - ((30) * 1000);
+      start = Math.floor(start / 1000);
 
-        var structure = self.get('structure');
-        var elements = self.get('elements');
+      this.HTTP.post('metrics', [
+        '/reactor/cluster/resources.total.memory?start=' + start + '&count=1&interpolate=step',
+        '/reactor/cluster/resources.total.storage?start=' + start + '&count=1&interpolate=step'
+        ], function (response) {
 
-        var pending = 0;
+        if (response.result && response.result[0].result.data.length) {
+          var result = response.result;
 
-        function next (object) {
+          var memory = result[0].result.data[0].value * MEGABYTES;
+          memory = C.Util.bytes(memory);
+          self.set('total.memory', {
+            label: memory[0],
+            unit: memory[1]
+          });
 
-          object.children = object.children || Em.ArrayProxy.create({ content: [] });
+          var storage = result[1].result.data[0].value * MEGABYTES;
+          storage = C.Util.bytes(storage);
+          self.set('total.storage', {
+            label: storage[0],
+            unit: storage[1]
+          });
 
-          if (typeof object.getSubPrograms === 'function') {
+        } else {
+          self.set('total.memory', {
+            label: 0,
+            unit: 'B'
+          });
+          self.set('total.storage', {
+            label: 0,
+            unit: 'B'
+          });
 
-            pending ++;
+        }
 
-            object.getSubPrograms(function (programs) {
+        self.HTTP.rest('apps', {cache: true}, function (objects) {
 
-              pending --;
+          var structure = self.get('structure');
+          var elements = self.get('elements');
 
-              for (var type in programs) {
+          function next (object) {
 
-                // Push list into controller cache.
-                elements[type].pushObjects(programs[type]);
+            object.children = object.children || Em.ArrayProxy.create({ content: [] });
 
-                var i = programs[type].length, program, context;
-                while (i--) {
+            if (typeof object.getSubPrograms === 'function') {
 
-                  program = programs[type][i];
-                  context = '/reactor' + program.get('context') + '/';
+              object.getSubPrograms(function (programs) {
 
-                  program.trackMetric(context + 'resources.used.memory', 'timeseries');
-                  program.trackMetric(context + 'resources.used.containers', 'currents', 'containers');
-                  program.trackMetric(context + 'resources.used.vcores', 'currents', 'cores');
+                for (var type in programs) {
 
-                  program.set('pleaseObserve', context + 'resources.used.memory');
+                  // Push list into entity cache.
+                  elements[type].pushObjects(programs[type]);
 
-                  object.children.pushObject(program);
-                  next(program);
+                  var program, context;
+
+                  for (var i = 0; i < programs[type].length; i ++) {
+
+                    program = programs[type][i];
+                    context = '/reactor' + program.get('context') + '/';
+
+                    program.trackMetric(context + 'resources.used.memory', 'timeseries', null, true);
+                    program.trackMetric(context + 'resources.used.containers', 'currents', 'containers');
+                    program.trackMetric(context + 'resources.used.vcores', 'currents', 'cores');
+
+                    // Tells the template-embedded chart which metric to render.
+                    program.set('pleaseObserve', context + 'resources.used.memory');
+
+                    object.children.pushObject(program);
+                    next(program);
+
+                  }
 
                 }
 
-              }
+              }, self.HTTP);
 
-            }, self.HTTP);
+            }
 
           }
 
-        }
-
-        var i = objects.length;
-        while (i--) {
-          objects[i] = C.App.create(objects[i]);
-          structure.children.pushObject(objects[i]);
-        }
-
-        next({
-          getSubPrograms: function (callback) {
-            callback({
-              'App': objects
-            });
+          var i = objects.length;
+          while (i--) {
+            objects[i] = C.App.create(objects[i]);
+            structure.children.pushObject(objects[i]);
           }
+
+          next({
+            getSubPrograms: function (callback) {
+              callback({
+                'App': objects
+              });
+            }
+          });
+
+          /*
+           * Give the chart Embeddables 100ms to configure
+           * themselves before updating.
+           */
+          setTimeout(function () {
+            self.updateStats();
+          }, C.EMBEDDABLE_DELAY);
+
+          self.interval = setInterval(function () {
+            self.updateStats();
+          }, C.POLLING_INTERVAL);
+
         });
-
-        /*
-         * Give the chart Embeddables 100ms to configure
-         * themselves before updating.
-         */
-        setTimeout(function () {
-          self.updateStats();
-        }, C.EMBEDDABLE_DELAY);
-
-        self.interval = setInterval(function () {
-          self.updateStats();
-        }, C.POLLING_INTERVAL);
 
       });
-
-      /*
-       * Check disk space
-       */
-      if (C.Env.cluster) {
-
-        this.HTTP.get('disk', function (disk) {
-          if (disk) {
-            var bytes = C.Util.bytes(disk.free);
-            $('#diskspace').find('.sparkline-box-title').html(
-              'Storage (' + bytes[0] + bytes[1] + ' Free)');
-          }
-        });
-
-      }
 
     },
 
@@ -161,7 +184,7 @@ define([], function () {
         return;
       }
 
-      var self = this, types = ['App', 'Flow', 'Flowlet', 'Batch', 'Workflow', 'Procedure'];
+      var self = this, types = ['App', 'Flow', 'Flowlet', 'Mapreduce', 'Workflow', 'Procedure'];
 
       var i, models = [];
       for (i = 0; i < types.length; i ++) {
@@ -170,23 +193,27 @@ define([], function () {
 
       var now = new Date().getTime();
 
-      // Add a two second buffer to make sure we have a full response.
-      var start = now - ((C.__timeRange + 2) * 1000);
-      start = Math.floor(start / 1000);
+      var start = 'now-' + (C.__timeRange + C.RESOURCE_METRICS_BUFFER) + 's';
+      var end = 'now-' + C.RESOURCE_METRICS_BUFFER + 's';
 
       this.clearTriggers(false);
 
       // Scans models for timeseries metrics and updates them.
-      C.Util.updateTimeSeries(models, this.HTTP, this);
+      C.Util.updateTimeSeries(models, this.HTTP, this, C.RESOURCE_METRICS_BUFFER);
 
-      // Scans models for current metrics and udpates them.
-      C.Util.updateCurrents(models, this.HTTP, this);
+      // Scans models for current metrics and updates them.
+      C.Util.updateCurrents(models, this.HTTP, this, C.RESOURCE_METRICS_BUFFER);
 
       // Hax. Count is timerange because server treats end = start + count (no downsample yet)
       var queries = [
-        '/reactor/resources.used.memory?count=' + C.__timeRange + '&start=' + start,
-        '/reactor/resources.used.containers?count=' + C.__timeRange + '&start=' + start,
-        '/reactor/resources.used.vcores?count=' + C.__timeRange + '&start=' + start
+        '/reactor/resources.used.memory?count=' + C.__timeRange + '&start=' + start + '&end=' +
+          end + '&interpolate=step',
+        '/reactor/resources.used.containers?count=' + C.__timeRange + '&start=' + start + '&end=' +
+          end +'&interpolate=step',
+        '/reactor/resources.used.vcores?count=' + C.__timeRange + '&start=' + start + '&end=' +
+          end + '&interpolate=step',
+        '/reactor/resources.used.storage?count=' + C.__timeRange + '&start=' + start + '&end=' +
+          end + '&interpolate=step'
       ], self = this;
 
       function lastValue(arr) {
@@ -199,9 +226,19 @@ define([], function () {
 
           var result = response.result;
 
+          var i = result[0].result.data.length;
+          while (i--) {
+            result[0].result.data[i].value = result[0].result.data[i].value * MEGABYTES;
+          }
+          i = result[3].result.data.length;
+          while (i--) {
+            result[3].result.data[i].value = result[3].result.data[i].value * MEGABYTES;
+          }
+
           self.set('timeseries.memory', result[0].result.data);
           self.set('timeseries.containers', result[1].result.data);
           self.set('timeseries.cores', result[2].result.data);
+          self.set('timeseries.storage', result[3].result.data);
 
           var memory = C.Util.bytes(lastValue(result[0].result.data));
           self.set('value.memory', {
@@ -211,6 +248,12 @@ define([], function () {
 
           self.set('value.containers', lastValue(result[1].result.data));
           self.set('value.cores', lastValue(result[2].result.data));
+
+          var storage = C.Util.bytes(lastValue(result[3].result.data));
+          self.set('value.storage', {
+            label: storage[0],
+            unit: storage[1]
+          });
 
         }
 

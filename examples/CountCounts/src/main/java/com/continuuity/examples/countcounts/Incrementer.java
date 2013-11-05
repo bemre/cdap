@@ -19,7 +19,6 @@ package com.continuuity.examples.countcounts;
 
 import com.continuuity.api.annotation.ProcessInput;
 import com.continuuity.api.annotation.UseDataSet;
-import com.continuuity.api.data.OperationException;
 import com.continuuity.api.flow.flowlet.AbstractFlowlet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,8 +34,8 @@ public class Incrementer extends AbstractFlowlet {
   CountCounterTable counters;
 
   @ProcessInput
-  public void process(Counts counts) throws OperationException {
-    LOG.debug(this.getContext().getName() + ": Received counts " + counts);
+  public void process(Counts counts) {
+    LOG.info(this.getContext().getName() + ": Received counts " + counts);
 
     // increment the word count (and count counts)
     this.counters.incrementWordCount(counts.getWordCount());

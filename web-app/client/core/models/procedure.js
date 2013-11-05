@@ -2,9 +2,9 @@
  * Procedure Model
  */
 
-define([], function () {
+define(['core/models/program'], function (Program) {
 
-	var Model = Em.Object.extend({
+	var Model = Program.extend({
 		type: 'Procedure',
 		plural: 'Procedures',
 		href: function () {
@@ -18,12 +18,6 @@ define([], function () {
 		init: function() {
 			this._super();
 
-			this.set('timeseries', Em.Object.create());
-			this.set('aggregates', Em.Object.create());
-			this.set('currents', Em.Object.create());
-
-			this.set('metrics', []);
-
 			this.set('name', (this.get('flowId') || this.get('id') || this.name));
 
 			this.set('app', this.get('applicationId') || this.get('app'));
@@ -33,28 +27,13 @@ define([], function () {
 			this.set('description', 'Procedure');
 
 		},
-		controlLabel: function () {
-
-			if (this.get('isRunning')) {
-				return 'Stop';
-			} else {
-				return 'Start';
-			}
-
-		}.property('currentState').cacheable(false),
-
-		units: {
-			'storage': 'bytes',
-			'containers': 'number',
-			'cores': 'number'
-		},
 
 		/*
 		 * Runnable context path, used by user-defined metrics.
 		 */
 		context: function () {
 
-			return this.interpolate('/apps/{parent}/flows/{id}');
+			return this.interpolate('/apps/{parent}/procedures/{id}');
 
 		}.property('app', 'name'),
 
@@ -62,45 +41,6 @@ define([], function () {
 
 			return path.replace(/\{parent\}/, this.get('app'))
 				.replace(/\{id\}/, this.get('name'));
-
-		},
-
-		trackMetric: function (path, kind, label) {
-
-			path = this.interpolate(path);
-			this.get(kind).set(C.Util.enc(path), Em.Object.create({
-				path: path,
-				value: label || []
-			}));
-			return path;
-
-		},
-
-		setMetric: function (label, value) {
-
-			var unit = this.get('units')[label];
-			value = C.Util[unit](value);
-
-			this.set(label + 'Label', value[0]);
-			this.set(label + 'Units', value[1]);
-
-		},
-
-		updateState: function (http) {
-
-			var self = this;
-
-			var app_id = this.get('app'),
-				procedure_id = this.get('name');
-
-			http.rest('apps', app_id, 'procedures', procedure_id, 'status',
-				function (response) {
-
-					if (!$.isEmptyObject(response)) {
-						self.set('currentState', response.status);
-					}
-
-			});
 
 		},
 
@@ -113,62 +53,8 @@ define([], function () {
 				});
 			}
 			return arr;
-		}.property('meta'),
-		isRunning: function () {
+		}.property('meta')
 
-			return this.get('currentState') === 'RUNNING' ? true : false;
-
-		}.property('currentState').cacheable(false),
-		started: function () {
-			return this.lastStarted >= 0 ? $.timeago(this.lastStarted) : 'No Date';
-		}.property('timeTrigger'),
-		stopped: function () {
-			return this.lastStopped >= 0 ? $.timeago(this.lastStopped) : 'No Date';
-		}.property('timeTrigger'),
-		actionIcon: function () {
-
-			if (this.currentState === 'RUNNING' ||
-				this.currentState === 'PAUSING') {
-				return 'btn-stop';
-			} else {
-				return 'btn-start';
-			}
-
-		}.property('currentState').cacheable(false),
-		stopDisabled: function () {
-
-			if (this.currentState === 'RUNNING') {
-				return false;
-			}
-			return true;
-
-		}.property('currentState'),
-		startPauseDisabled: function () {
-
-			if (this.currentState !== 'STOPPED' &&
-				this.currentState !== 'PAUSED' &&
-				this.currentState !== 'DEPLOYED' &&
-				this.currentState !== 'RUNNING') {
-				return true;
-			}
-			return false;
-
-		}.property('currentState'),
-		defaultAction: function () {
-			if (!this.currentState) {
-				return '...';
-			}
-			return {
-				'deployed': 'Start',
-				'stopped': 'Start',
-				'stopping': 'Start',
-				'starting': 'Start',
-				'running': 'Stop',
-				'adjusting': '...',
-				'draining': '...',
-				'failed': 'Start'
-			}[this.currentState.toLowerCase()];
-		}.property('currentState')
 	});
 
 	Model.reopenClass({
@@ -182,7 +68,7 @@ define([], function () {
 			var app_id = model_id[0];
 			var procedure_id = model_id[1];
 
-			http.rest('apps', app_id, 'procedures', procedure_id, function (model, error) {
+			http.rest('apps', app_id, 'procedures', procedure_id, {cache: true}, function (model, error) {
 				var model = self.transformModel(model);
 				model.applicationId = app_id;
 				model = C.Procedure.create(model);

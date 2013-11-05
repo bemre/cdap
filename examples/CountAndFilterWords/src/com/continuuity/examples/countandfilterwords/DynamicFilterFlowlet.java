@@ -63,7 +63,7 @@ public class DynamicFilterFlowlet extends AbstractFlowlet {
 
   @Override
   public void initialize(FlowletContext context) {
-    Map<String, String> args = context.getSpecification().getArguments();
+    Map<String, String> args = context.getSpecification().getProperties();
     filterName = args.get("filterName");
     filterRegex = args.get("filterRegex");
     if (filterName == null || filterRegex == null) {
@@ -77,12 +77,12 @@ public class DynamicFilterFlowlet extends AbstractFlowlet {
   @ProcessInput("tokens")
   public void process(String token) {
     metric.count("tokens.processed", 1);
-    LOG.debug("Processing token '" + token + "' against filter with name " +
+    LOG.info("Processing token '" + token + "' against filter with name " +
                    filterName + " and regex " + filterRegex);
 
     if (Pattern.matches(filterRegex, token)) {
       metric.count("tokens.matched", 1);
-      LOG.debug("Matched token " + token + " against filter " + filterName);
+      LOG.info("Matched token " + token + " against filter " + filterName);
       countOutput.emit(filterName);
     }
 

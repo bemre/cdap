@@ -3,7 +3,7 @@
  * Defines routes and attaches mocks
  */
 
-define (['core/application'], function (Application) {
+define (['core/application', 'helpers/localstorage-adapter'], function (Application, SSAdapter) {
 
 	/*
 	 * Determine whether to swap out specific components with mocks.
@@ -83,6 +83,21 @@ define (['core/application'], function (Application) {
 	 */
 	window.C = Application.create();
 
+	if (C.ENABLE_CACHE) {
+		/**
+		 * Add storage adapter.
+		 */
+		C.SSAdapter = new SSAdapter('continuuity', '/rest/apps', 5000);
+
+		C.SSAdapter.on('cacheExpired', function () {
+			$('#warning').html('<div>This page has updated since you last opened it. Please' +
+			' <span id="warning-reload">reload</a>.</div>').show();
+			$('#warning-reload').click(function () {
+				window.location.reload();
+			});
+		});
+	}
+
 	/*
 	 * Temporary hold for Tree controls. (Resource View)
 	 */
@@ -160,12 +175,13 @@ define (['core/application'], function (Application) {
 
 		});
 
-		this.resource('Batch', {path: '/batches/:batch_id'}, function() {
+		this.resource('Mapreduce', {path: '/mapreduce/:mapreduce_id'}, function() {
 
-			this.resource('BatchStatus', { path: '/' }, function () {
-				// These live in BatchStatus so they can visually overlay the Batch Job.
+			this.resource('MapreduceStatus', { path: '/' }, function () {
+				// These live in MapreduceStatus so they can visually overlay the Mapreduce Job.
 				this.route('Config', { path: '/config' });
 			});
+
 			this.route('Log', { path: '/log'});
 			this.route('History', { path: '/history'});
 
@@ -185,6 +201,7 @@ define (['core/application'], function (Application) {
 	});
 
 	function modelFinder (params) {
+
 		for (var key in params) {
       if (params.hasOwnProperty(key)) {
         /*
@@ -212,6 +229,8 @@ define (['core/application'], function (Application) {
 		setupController: function(controller, model) {
 			controller.set('model', model);
 			controller.load();
+
+			window.scrollTo(0, 0);
 		},
 		/*
 		 * Override to unload the Controller once the Route has been deactivated.
@@ -301,32 +320,32 @@ define (['core/application'], function (Application) {
 		/*
 		 * Ensures that the model is handled properly (see basicRouter)
 		 */
-		BatchRoute: Ember.Route.extend({
+		MapreduceRoute: Ember.Route.extend({
 			model: modelFinder
 		}),
 
-		BatchStatusRoute: basicRouter.extend({
+		MapreduceStatusRoute: basicRouter.extend({
 			model: function() {
-				return this.modelFor('Batch');
+				return this.modelFor('Mapreduce');
 			}
 		}),
 
-		BatchLogRoute: basicRouter.extend({
+		MapreduceLogRoute: basicRouter.extend({
 			model: function () {
-				return this.modelFor('Batch');
+				return this.modelFor('Mapreduce');
 			},
 			renderTemplate: function () {
 				this.render('Runnable/Log');
 			}
 		}),
 
-		BatchHistoryRoute: basicRouter.extend({
+		MapreduceHistoryRoute: basicRouter.extend({
 			model: function() {
-				return this.modelFor('Batch');
+				return this.modelFor('Mapreduce');
 			}
 		}),
 
-		BatchStatusConfigRoute: basicRouter.extend({
+		MapreduceStatusConfigRoute: basicRouter.extend({
 			renderTemplate: function () {
 				this.render('Runnable/Config');
 			}
@@ -444,11 +463,9 @@ define (['core/application'], function (Application) {
 
 		StreamsRoute: Em.Route.extend(getListHandler(['Stream'])),
 
-		FlowsRoute: Em.Route.extend(getListHandler(['Flow', 'Batch', 'Workflow'])),
+		FlowsRoute: Em.Route.extend(getListHandler(['Flow', 'Mapreduce', 'Workflow'])),
 
 		WorkflowsRoute: Em.Route.extend(getListHandler(['Workflow'])),
-
-		BatchesRoute: Em.Route.extend(getListHandler(['Batch'])),
 
 		DatasetsRoute: Em.Route.extend(getListHandler(['Dataset'])),
 

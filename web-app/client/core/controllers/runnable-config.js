@@ -1,6 +1,6 @@
 /*
  * Runnable Config Controller
- * Runnables (Flow, Batch, Procedure) extend this for Config functionality.
+ * Runnables (Flow, Mapreduce, Procedure) extend this for Config functionality.
  */
 
 define([], function () {
@@ -135,7 +135,7 @@ define([], function () {
 
 			config = JSON.stringify(config);
 
-			this.HTTP.post('rest', 'apps', model.get('app'),
+			this.HTTP.put('rest', 'apps', model.get('app'),
 				model.get('plural').toLowerCase(),
 				model.get('name'), 'runtimeargs', {
 					data: config
@@ -151,21 +151,14 @@ define([], function () {
 
 		runOnce: function () {
 
-			var list = this.get('config');
-			var i = list.length;
 			var config = {};
-
 			this.get('config').forEach(function (item) {
 				config[item.key] = item.value;
 			});
 
 			var model = this.get('model');
-			var app = model.get('app');
-			var id = model.get('name');
-			var version = model.get('version');
+			model.startWithConfig(this.HTTP, config);
 
-			var parent = this.get('needs')[0];
-			this.get('controllers').get(parent).start(app, id, config);
 			this.close();
 
 		},
@@ -174,6 +167,18 @@ define([], function () {
 
 			this.save();
 			this.runOnce();
+
+		},
+
+		saveAndRestart: function () {
+
+			this.save();
+
+			var program = this.get('model'), self = this;
+
+			program.stop(this.HTTP, function () {
+				self.runOnce();
+			});
 
 		},
 

@@ -3,15 +3,12 @@ package com.continuuity.gateway.v2.runtime;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.conf.Constants;
 import com.continuuity.common.http.core.HttpHandler;
-import com.continuuity.common.metrics.CMetrics;
-import com.continuuity.common.metrics.MetricType;
 import com.continuuity.common.runtime.RuntimeModule;
 import com.continuuity.common.utils.Networks;
 import com.continuuity.gateway.auth.GatewayAuthenticator;
 import com.continuuity.gateway.auth.NoAuthenticator;
 import com.continuuity.gateway.auth.PassportVPCAuthenticator;
 import com.continuuity.gateway.v2.handlers.v2.AppFabricServiceHandler;
-import com.continuuity.gateway.v2.handlers.v2.MetadataServiceHandler;
 import com.continuuity.gateway.v2.handlers.v2.PingHandler;
 import com.continuuity.gateway.v2.handlers.v2.ProcedureHandler;
 import com.continuuity.gateway.v2.handlers.v2.WorkflowHandler;
@@ -55,18 +52,12 @@ public class GatewayModules extends RuntimeModule {
   }
 
   private Module getCommonModules() {
-    final CMetrics cMetrics = new CMetrics(MetricType.System);
-
     return new AbstractModule() {
       @Override
       protected void configure() {
-        bind(CMetrics.class).toInstance(cMetrics);
-
-        Multibinder<HttpHandler> handlerBinder =
-          Multibinder.newSetBinder(binder(), HttpHandler.class);
+        Multibinder<HttpHandler> handlerBinder = Multibinder.newSetBinder(binder(), HttpHandler.class);
         handlerBinder.addBinding().to(StreamHandler.class).in(Scopes.SINGLETON);
         handlerBinder.addBinding().to(PingHandler.class).in(Scopes.SINGLETON);
-        handlerBinder.addBinding().to(MetadataServiceHandler.class).in(Scopes.SINGLETON);
         handlerBinder.addBinding().to(AppFabricServiceHandler.class).in(Scopes.SINGLETON);
         handlerBinder.addBinding().to(LogHandler.class).in(Scopes.SINGLETON);
         handlerBinder.addBinding().to(ProcedureHandler.class).in(Scopes.SINGLETON);
@@ -74,7 +65,6 @@ public class GatewayModules extends RuntimeModule {
         handlerBinder.addBinding().to(TableHandler.class).in(Scopes.SINGLETON);
         handlerBinder.addBinding().to(DatasetHandler.class).in(Scopes.SINGLETON);
         handlerBinder.addBinding().to(ClearFabricHandler.class).in(Scopes.SINGLETON);
-
         install(new MetricsQueryModule());
       }
 

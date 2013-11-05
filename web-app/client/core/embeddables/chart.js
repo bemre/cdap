@@ -7,13 +7,18 @@ define([], function () {
 	var Embeddable = Em.View.extend({
 
 		updateData: function (redraw) {
-
+			var self = this;
+			var count = 0;
+			var buffer = (C.POLLING_INTERVAL / 1000);
 			var metrics = this.get('metrics');
+
+			clearInterval(self.interval);
 
 			for (var i = 0; i < metrics.length; i ++) {
 				var metric = metrics[i];
 
-				if (this.get('model') && this.get('model').timeseries) {
+				if (this.get('model') && this.get('model').timeseries &&
+					this.get('model').timeseries[C.Util.enc(metric)]) {
 
 					var data = this.get('model').timeseries[C.Util.enc(metric)].value;
 
@@ -32,7 +37,15 @@ define([], function () {
 						}
 
 						this.get('sparkline').update(i, data);
-						this.get('label').html(this.__formatLabel(data[data.length - 1]));
+						self.get('label').html(self.__formatLabel(data[data.length - buffer]));
+
+						self.interval = setInterval(function () {
+							if (++count < buffer) {
+								var labelValue = data[data.length - buffer + count];
+								self.get('label').html(self.__formatLabel(labelValue));
+							}
+						}, 1000);
+
 					}
 				}
 			}
@@ -116,10 +129,13 @@ define([], function () {
 			} if (this.get('unit') === 'bytes') {
 				value = C.Util.bytes(value);
 
-				return value[0] + (this.get('listMode') ? value[1] : '<br /><span>' + value[1] + '</span>');
+				return value[0] + (this.get('listMode') ? value[1] : '<br /><span>' + value[1] + 'ps</span>');
 			} else {
+
+				var unit = this.get('unit') ? this.get('unit') : 'EPS';
+
 				value = C.Util.number(value);
-				return value[0] + value[1] + (this.get('listMode') ? '' : '<br /><span>TPS</span>');
+				return value[0] + value[1] + (this.get('listMode') ? '' : '<br /><span>' + unit + '</span>');
 			}
 		},
 		fillContainer: function (rerender) {
@@ -165,7 +181,7 @@ define([], function () {
 				$(this.get('element')).append('<div class="sparkline-flowlet-title">' + this.__getTitle() + '</div>');
 
 				container = $('<div class="sparkline-flowlet-container" />').appendTo(this.get('element'));
-				this.set('overlapX', 48);
+				this.set('overlapX', 23);
 
 			} else if (this.get('listMode') || entityType) {
 
@@ -174,7 +190,7 @@ define([], function () {
 				$(this.get('element')).addClass(color || 'blue');
 				label = $('<div class="sparkline-list-value" />').appendTo(this.get('element'));
 				container = $('<div class="sparkline-list-container"><div class="sparkline-list-container-empty">&nbsp;</div></div>').appendTo(this.get('element'));
-				this.set('overlapX', 69);
+				this.set('overlapX', 52);
 				this.set('height', 38);
 
 			} else {
@@ -185,7 +201,7 @@ define([], function () {
 				container.addClass('sparkline-box-container');
 				$(this.get('element')).append('<div class="sparkline-box-title">' + this.__getTitle() + '</div>');
 				container.appendTo(this.get('element'));
-				this.set('overlapX', 71);
+				this.set('overlapX', 54);
 				this.set('height', 70);
 
 			}

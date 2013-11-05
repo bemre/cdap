@@ -3,8 +3,12 @@
  */
 package com.continuuity.metrics.query;
 
+import com.continuuity.common.conf.Constants;
 import com.continuuity.common.metrics.MetricsScope;
+import com.continuuity.common.utils.TimeMathParser;
 import com.continuuity.metrics.MetricsConstants;
+import com.continuuity.metrics.data.Interpolator;
+import com.continuuity.metrics.data.Interpolators;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import org.apache.commons.lang.CharEncoding;
@@ -26,11 +30,19 @@ final class MetricsRequestParser {
   private static final String COUNT = "count";
   private static final String START_TIME = "start";
   private static final String END_TIME = "end";
+  private static final String INTERPOLATE = "interpolate";
+  private static final String STEP_INTERPOLATOR = "step";
+  private static final String LINEAR_INTERPOLATOR = "linear";
+  private static final String MAX_INTERPOLATE_GAP = "maxInterpolateGap";
+  private static final String CLUSTER_METRICS_CONTEXT = "-.cluster";
+  private static final String CONTEXT_SEPARATOR = ".";
+
 
   private enum PathType {
     APPS,
     DATASETS,
-    STREAMS
+    STREAMS,
+    CLUSTER
   }
 
   private enum ProgramType {
@@ -79,7 +91,6 @@ final class MetricsRequestParser {
    */
   static MetricsRequest parse(URI requestURI) {
     MetricsRequestBuilder builder = new MetricsRequestBuilder(requestURI);
-
     // metric will be at the end.
     String uriPath = requestURI.getRawPath();
     int index = uriPath.lastIndexOf("/");
@@ -87,7 +98,14 @@ final class MetricsRequestParser {
 
     // strip the metric from the end of the path
     String strippedPath = uriPath.substring(0, index);
-    Iterator<String> pathParts = Splitter.on('/').omitEmptyStrings().split(strippedPath).iterator();
+
+    parseContext(strippedPath, builder);
+    parseQueryString(requestURI, builder);
+    return builder.build();
+  }
+
+  static void parseContext(String contextPath, MetricsRequestBuilder builder) {
+    Iterator<String> pathParts = Splitter.on('/').omitEmptyStrings().split(contextPath).iterator();
 
     // Scope
     builder.setScope(MetricsScope.valueOf(pathParts.next().toUpperCase()));
@@ -96,8 +114,7 @@ final class MetricsRequestParser {
     if (!pathParts.hasNext()) {
       // null context means the context can be anything
       builder.setContextPrefix(null);
-      parseQueryString(requestURI, builder);
-      return builder.build();
+      return;
     }
 
     // apps, streams, or datasets
@@ -118,14 +135,28 @@ final class MetricsRequestParser {
           builder.setContextPrefix(null);
         }
         break;
+      case CLUSTER:
+        builder.setContextPrefix(CLUSTER_METRICS_CONTEXT);
+        break;
     }
-
-    parseQueryString(requestURI, builder);
-    return builder.build();
   }
 
   /**
-   * At this point, pathParts should look like {app-id}/{program-type}/{program-id}/{component-type}/{component-id}
+   * Given a full metrics path like '/v2/metrics/reactor/apps/collect.events', strip the preceding version and
+   * metrics to return 'reactor/apps/collect.events', representing the context and metric, which can then be
+   * parsed by this parser.
+   *
+   * @param path request path.
+   * @return request path stripped of version and metrics.
+   */
+  static String stripVersionAndMetricsFromPath(String path) {
+    // +9 for "/metrics/"
+    int startPos = Constants.Gateway.GATEWAY_VERSION.length() + 9;
+    return path.substring(startPos, path.length());
+  }
+
+  /**
+   * At this point, pathParts should look like {app-id}/{program-type}/{program-id}/{component-type}/{component-id}.
    */
   private static void buildAppContext(Iterator<String> pathParts, MetricsRequestBuilder builder) {
     String contextPrefix = urlDecode(pathParts.next());
@@ -137,14 +168,14 @@ final class MetricsRequestParser {
 
     // program-type, flows, procedures, or mapreduce
     ProgramType programType = ProgramType.valueOf(pathParts.next().toUpperCase());
-    contextPrefix += "." + programType.getId();
+    contextPrefix += CONTEXT_SEPARATOR + programType.getId();
 
     // contextPrefix should look like appId.f right now, if we're looking at a flow
     if (!pathParts.hasNext()) {
       builder.setContextPrefix(contextPrefix);
       return;
     }
-    contextPrefix += "." + urlDecode(pathParts.next());
+    contextPrefix += CONTEXT_SEPARATOR + urlDecode(pathParts.next());
 
     if (!pathParts.hasNext()) {
       builder.setContextPrefix(contextPrefix);
@@ -165,26 +196,26 @@ final class MetricsRequestParser {
 
 
   /**
-   *At this point, pathParts should look like {mappers | reducers}/{optional id}
+   * At this point, pathParts should look like {mappers | reducers}/{optional id}.
    */
   private static void buildMapReduceContext(String contextPrefix, Iterator<String> pathParts,
                                             MetricsRequestBuilder builder) {
     MapReduceType mrType = MapReduceType.valueOf(pathParts.next().toUpperCase());
-    contextPrefix += "." + mrType.getId();
+    contextPrefix += CONTEXT_SEPARATOR + mrType.getId();
     if (pathParts.hasNext()) {
-      contextPrefix += "." + pathParts.next();
+      contextPrefix += CONTEXT_SEPARATOR + pathParts.next();
       Preconditions.checkArgument(!pathParts.hasNext(), "not expecting anything after mapper or reducer id");
     }
     builder.setContextPrefix(contextPrefix);
   }
 
   /**
-   * At this point, pathParts should look like flowlets/{flowlet-id}/queues/{queue-id}, with queues being optional
+   * At this point, pathParts should look like flowlets/{flowlet-id}/queues/{queue-id}, with queues being optional.
    */
   private static void buildFlowletContext(String contextPrefix, Iterator<String> pathParts,
                                           MetricsRequestBuilder builder) {
     Preconditions.checkArgument(pathParts.next().equals("flowlets"), "expecting 'flowlets' after flow id");
-    contextPrefix += "." + urlDecode(pathParts.next());
+    contextPrefix += CONTEXT_SEPARATOR + urlDecode(pathParts.next());
     builder.setContextPrefix(contextPrefix);
 
     if (pathParts.hasNext()) {
@@ -201,29 +232,8 @@ final class MetricsRequestParser {
     Map<String, List<String>> queryParams = new QueryStringDecoder(requestURI).getParameters();
 
     // Extracts the query type.
-    if (queryParams.containsKey(COUNT)) {
-      try {
-        int count = Integer.parseInt(queryParams.get(COUNT).get(0));
-        long endTime = queryParams.containsKey(END_TIME)
-                          ? Integer.parseInt(queryParams.get(END_TIME).get(0))
-                          : TimeUnit.SECONDS.convert(System.currentTimeMillis(), TimeUnit.MILLISECONDS) -
-                                MetricsConstants.QUERY_SECOND_DELAY;
-
-        long startTime = queryParams.containsKey(START_TIME)
-                          ? Integer.parseInt(queryParams.get(START_TIME).get(0))
-                          : endTime - count;
-
-        if (startTime + count != endTime) {
-          endTime = startTime + count;
-        }
-
-        builder.setStartTime(startTime);
-        builder.setEndTime(endTime);
-        builder.setCount(count);
-        builder.setType(MetricsRequest.Type.TIME_SERIES);
-      } catch (Exception e) {
-        throw new IllegalArgumentException(e);
-      }
+    if (isTimeseriesRequest(queryParams)) {
+      parseTimeseries(queryParams, builder);
     } else {
       boolean foundType = false;
       for (MetricsRequest.Type type : MetricsRequest.Type.values()) {
@@ -238,6 +248,64 @@ final class MetricsRequestParser {
     }
   }
 
+  private static boolean isTimeseriesRequest(Map<String, List<String>> queryParams) {
+    return queryParams.containsKey(COUNT) || queryParams.containsKey(START_TIME) || queryParams.containsKey(END_TIME);
+  }
+
+  private static void parseTimeseries(Map<String, List<String>> queryParams, MetricsRequestBuilder builder) {
+    int count;
+    long startTime;
+    long endTime;
+    long now = TimeUnit.SECONDS.convert(System.currentTimeMillis(), TimeUnit.MILLISECONDS);
+
+    if (queryParams.containsKey(START_TIME) && queryParams.containsKey(END_TIME)) {
+      startTime = TimeMathParser.parseTime(now, queryParams.get(START_TIME).get(0));
+      endTime = TimeMathParser.parseTime(now, queryParams.get(END_TIME).get(0));
+      count = (int) (endTime - startTime) + 1;
+    } else if (queryParams.containsKey(COUNT)) {
+      count = Integer.parseInt(queryParams.get(COUNT).get(0));
+      // both start and end times are inclusive, which is the reason for the +-1.
+      if (queryParams.containsKey(START_TIME)) {
+        startTime = TimeMathParser.parseTime(now, queryParams.get(START_TIME).get(0));
+        endTime = startTime + count - 1;
+      } else if (queryParams.containsKey(END_TIME)) {
+        endTime = TimeMathParser.parseTime(now, queryParams.get(END_TIME).get(0));
+        startTime = endTime - count + 1;
+      } else {
+        // if only count is specified, assume the current time is desired as the end.
+        endTime = now - MetricsConstants.QUERY_SECOND_DELAY;
+        startTime = endTime - count + 1;
+      }
+    } else {
+      throw new IllegalArgumentException("must specify 'count', or both 'start' and 'end'");
+    }
+
+    builder.setStartTime(startTime);
+    builder.setEndTime(endTime);
+    builder.setCount(count);
+    builder.setType(MetricsRequest.Type.TIME_SERIES);
+    setInterpolator(queryParams, builder);
+  }
+
+  private static void setInterpolator(Map<String, List<String>> queryParams, MetricsRequestBuilder builder) {
+    Interpolator interpolator = null;
+
+    if (queryParams.containsKey(INTERPOLATE)) {
+      String interpolatorType = queryParams.get(INTERPOLATE).get(0);
+      // timeLimit used in case there is a big gap in the data and we don't want to interpolate points.
+      // the limit defines how big the gap has to be in seconds before we just say they're all zeroes.
+      long timeLimit = queryParams.containsKey(MAX_INTERPOLATE_GAP)
+        ? Long.parseLong(queryParams.get(MAX_INTERPOLATE_GAP).get(0))
+        : Long.MAX_VALUE;
+
+      if (STEP_INTERPOLATOR.equals(interpolatorType)) {
+        interpolator = new Interpolators.Step(timeLimit);
+      } else if (LINEAR_INTERPOLATOR.equals(interpolatorType)) {
+        interpolator = new Interpolators.Linear(timeLimit);
+      }
+    }
+    builder.setInterpolator(interpolator);
+  }
 
   /**
    * Gets a query string parameter by the given key. It will returns the first value if available or the default value

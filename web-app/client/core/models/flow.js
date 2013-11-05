@@ -2,12 +2,11 @@
  * Flow Model
  */
 
-define([], function () {
+define(['core/models/program'], function (Program) {
 
-	var Model = Em.Object.extend({
+	var Model = Program.extend({
 		type: 'Flow',
 		plural: 'Flows',
-
 		href: function () {
 			return '#/flows/' + this.get('id');
 		}.property('id'),
@@ -17,11 +16,8 @@ define([], function () {
 		currentState: '',
 
 		init: function() {
-			this._super();
 
-			this.set('timeseries', Em.Object.create());
-			this.set('aggregates', Em.Object.create());
-			this.set('currents', Em.Object.create());
+			this._super();
 
 			this.set('name', (this.get('flowId') || this.get('id') || this.get('meta').name));
 
@@ -31,13 +27,6 @@ define([], function () {
 
 			this.set('description', this.get('meta') || 'Flow');
 
-		},
-
-		units: {
-			'events': 'number',
-			'storage': 'bytes',
-			'containers': 'number',
-			'cores': 'number'
 		},
 
 		/*
@@ -53,42 +42,6 @@ define([], function () {
 
 			return path.replace(/\{parent\}/, this.get('app'))
 				.replace(/\{id\}/, this.get('name'));
-
-		},
-
-		trackMetric: function (path, kind, label) {
-
-			path = this.interpolate(path);
-			this.get(kind).set(C.Util.enc(path), Em.Object.create({
-				path: path,
-				value: label || []
-			}));
-			return path;
-
-		},
-
-		setMetric: function (label, value) {
-
-			var unit = this.get('units')[label];
-			value = C.Util[unit](value);
-
-			this.set(label + 'Label', value[0]);
-			this.set(label + 'Units', value[1]);
-
-		},
-
-		updateState: function (http) {
-
-			var self = this;
-
-			var app_id = this.get('app'),
-				flow_id = this.get('name');
-
-			http.rest('apps', app_id, 'flows', flow_id, 'status', function (response) {
-				if (!$.isEmptyObject(response)) {
-					self.set('currentState', response.status);
-				}
-			});
 
 		},
 
@@ -125,51 +78,7 @@ define([], function () {
 				});
 			}
 			return arr;
-		}.property('meta'),
-
-		isRunning: function() {
-
-			if (this.currentState !== 'RUNNING') {
-				return false;
-			}
-			return true;
-
-		}.property('currentState'),
-
-		started: function () {
-			return this.lastStarted >= 0 ? $.timeago(this.lastStarted) : 'No Date';
-		}.property('timeTrigger'),
-
-		stopped: function () {
-			return this.lastStopped >= 0 ? $.timeago(this.lastStopped) : 'No Date';
-		}.property('timeTrigger'),
-
-		actionIcon: function () {
-
-			if (this.currentState === 'RUNNING' ||
-				this.currentState === 'PAUSING') {
-				return 'btn-pause';
-			} else {
-				return 'btn-start';
-			}
-
-		}.property('currentState').cacheable(false),
-
-		stopDisabled: function () {
-
-			if (this.currentState === 'RUNNING') {
-				return false;
-			}
-			return true;
-
-		}.property('currentState'),
-
-		startDisabled: function () {
-			if (this.currentState === 'RUNNING') {
-				return true;
-			}
-			return false;
-		}.property('currentState')
+		}.property('meta')
 
 	});
 
@@ -184,7 +93,7 @@ define([], function () {
 			var app_id = model_id[0];
 			var flow_id = model_id[1];
 
-			http.rest('apps', app_id, 'flows', flow_id, function (model, error) {
+			http.rest('apps', app_id, 'flows', flow_id, {cache: true}, function (model, error) {
 
 				var model = self.transformModel(model);
 				if (model.hasOwnProperty('flowletStreams')) {
@@ -330,13 +239,13 @@ define([], function () {
 							});
 						} else if (z > 0 && z !== diff -1) {
 							newConnections.push({
-								sourceType: 'dummy',
+								sourceType: 'FLOWLET',
 								sourceName: 'dummy',
 								targetName: 'dummy'
 							});
 						} else if (z === diff - 1) {
 							newConnections.push({
-								sourceType: connections[i].sourceType,
+								sourceType: 'FLOWLET',
 								sourceName: 'dummy',
 								targetName: connections[i].targetName
 							});

@@ -2,9 +2,9 @@
  * Application
  */
 
-define(['core/components', 'core/embeddables/index', 'core/http', 'core/socket',
+define(['core/components', 'core/embeddables/index', 'core/http',
 				'core/util'],
-function(Components, Embeddables, HTTP, Socket, Util) {
+function(Components, Embeddables, HTTP, Util) {
 
 	var Application = Ember.Application.extend({
 
@@ -16,7 +16,7 @@ function(Components, Embeddables, HTTP, Socket, Util) {
 		/*
 		 * Constant: Polling interval for metrics.
 		 */
-		POLLING_INTERVAL: 1000,
+		POLLING_INTERVAL: 5000,
 
 		/*
 		 * Constant: Delay to wait for Embeddables to configure before checking them.
@@ -27,6 +27,27 @@ function(Components, Embeddables, HTTP, Socket, Util) {
 		 * Variable: Whether to watch and warn about latency.
 		 */
 		WATCH_LATENCY: false,
+
+		/*
+		 * Number of points to render on a sparkline.
+		 */
+		SPARKLINE_POINTS: 60,
+
+		/*
+		 * A buffer in seconds to account for metrics system latency.
+		 */
+		METRICS_BUFFER: 5,
+
+		/*
+		 * A buffer in seconds to account for resource metrics system latency.
+		 * Higher because resource metrics are only written every 20 seconds.
+		 */
+		RESOURCE_METRICS_BUFFER: 30,
+
+		/*
+		 * Enable or disable local cache.
+		 */
+		ENABLE_CACHE: typeof Storage !== "undefined",
 
 		/*
 		 * Allows us to set the ID of the main view element.
@@ -50,30 +71,53 @@ function(Components, Embeddables, HTTP, Socket, Util) {
 				/*
 				 * Do version check.
 				 */
-				this.HTTP.get('version', this.checkVersion);
+				this.HTTP.get('version', {cache: true}, this.checkVersion);
 			},
 
 			checkVersion: function(version) {
 
 				if (version && version.current !== 'UNKNOWN') {
 
-					if (version.current !== version.newest) {
+					if (version.current !== version.newest &&
+						version.current.indexOf('SNAPSHOT') === -1 &&
+						C.get('isLocal')) {
 
 						$('#warning').html('<div>New version available: ' + version.current + ' » ' +
-							version.newest + ' <a target="_blank" href="https://accounts.continuuity.com/">' +
+							version.newest + '<br /><a target="_blank" href="https://accounts.continuuity.com/">' +
 							'Click here to download</a>.</div>').show();
 					}
 				}
 			}
 		}),
 
+		isLocal: function () {
+
+			return this.get('Env.productId') === 'local';
+
+		}.property('Env.productName'),
+
+		isEnterprise: function () {
+
+			return this.get('Env.productId') === 'enterprise';
+
+		}.property('Env.productName'),
+
+		initialize: function (http) {
+			var self = this;
+			http.get('environment', {cache: true}, function (response) {
+				 self.setupEnvironment(response);
+			});
+
+		},
+
 		setupEnvironment: function (env) {
 
-			C.Env.set('version', env.version);
-			C.Env.set('location', env.location);
-			C.Env.set('productName', env.product.toLowerCase());
+			C.Env.set('version', env.product_version);
+			C.Env.set('productId', env.product_id);
+			C.Env.set('productName', env.product_name);
+			C.Env.set('ip', env.ip);
 
-			$('title').text(env.product + ' » Continuuity');
+			$('title').text(env.product_name + ' » Continuuity');
 
 			if (env.account) {
 
@@ -94,10 +138,6 @@ function(Components, Embeddables, HTTP, Socket, Util) {
 
 			}
 
-			if (env.version && env.version !== 'UNKNOWN') {
-				$('#build-number').html(' &#183; BUILD <span>' + env.version + '</span>').attr('title', env.ip);
-			}
-
 			/*
 			 * Append the product theme CSS
 			 */
@@ -107,7 +147,7 @@ function(Components, Embeddables, HTTP, Socket, Util) {
 			/*
 			 * Load patch.
 			 */
-			require([C.Env.productName + '/views/index'], function (Patch) {
+			require([C.Env.productId + '/views/index'], function (Patch) {
 
 				/*
 				 * Patching feature not being used yet.
@@ -123,11 +163,25 @@ function(Components, Embeddables, HTTP, Socket, Util) {
 
 		},
 
+		ready: function (){
+
+			Em.run.next(function () {
+
+				if (C.Env.version && C.Env.version !== 'UNKNOWN') {
+					setTimeout(function () {
+						$('#build-number').html('<span>&nbsp;&#183;&nbsp;&nbsp;</span><span>' + C.Env.version + '</span>').attr('title', C.Env.ip);
+					}, C.EMBEDDABLE_DELAY);
+				}
+
+			});
+
+		},
+
 		getThemeLink: function() {
 			var themeLink = document.createElement('link');
 			themeLink.setAttribute("rel", "stylesheet");
 			themeLink.setAttribute("type", "text/css");
-			themeLink.setAttribute("href", "/assets/css/" + C.Env.get('productName') + ".css");
+			themeLink.setAttribute("href", "/assets/css/" + C.Env.get('productId') + ".css");
 			return themeLink;
 		},
 
@@ -151,39 +205,7 @@ function(Components, Embeddables, HTTP, Socket, Util) {
 		removeResizeHandler: function (id) {
 			delete this.resizeHandlers[id];
 		},
-		/*
-		 * Application-level event handlers for Resource events
-		 */
-		__handlers: {
-			'Socket': {
-				/*
-				 * Called when the socket is (re)connected.
-				 */
-				'connect': function (env) {
-					if (!C.initialized) {
-						C.setupEnvironment(env);
-					} else {
-						$('#warning').html('<div>Reconnected!</div>').fadeOut();
-					}
-				},
-				/*
-				 * Called when the socket experiences an error.
-				 */
-				'error': function (message, args) {
-					if (typeof message === "object") {
-						message = message.message;
-					}
-					$('#warning').html('<div>' + message + '</div>').show();
 
-				},
-				/*
-				 * Called when the socket receives JAR upload status information.
-				 */
-				'upload': function (status) {
-					Util.Upload.update(status);
-				}
-			}
-		},
 		/*
 		 * Stores an indication of which resources are being mocked.
 		 */
@@ -249,7 +271,7 @@ function(Components, Embeddables, HTTP, Socket, Util) {
 
 		initialize: function(container, application) {
 
-			var resources = [HTTP, Socket];
+			var resources = [HTTP];
 			var i = resources.length, type, resource;
 			while(i--) {
 
@@ -263,21 +285,6 @@ function(Components, Embeddables, HTTP, Socket, Util) {
 					 */
 					container.typeInjection('controller', type, type + ':main');
 
-					/*
-					 * Check Application-level event handlers on the resource.
-					 */
-					if (typeof C.__handlers[type] === 'object') {
-
-						resource = container.lookup(type + ':main');
-						for (var event in C.__handlers[type]) {
-							resource.on(event, C.__handlers[type][event]);
-						}
-						if (typeof resource.connect === 'function') {
-							resource.connect();
-						}
-
-					}
-
 				}
 			}
 
@@ -286,6 +293,7 @@ function(Components, Embeddables, HTTP, Socket, Util) {
 			 * See "advanceReadiness" in the "setupEnvironment" call above.
 			 */
 			C.deferReadiness();
+			C.initialize(HTTP.create());
 
 		}
 	});

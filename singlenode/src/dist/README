@@ -1,4 +1,4 @@
-Continuuity (tm) Reactor Development Kit - 1.7.3
+Continuuity (tm) Reactor Development Kit - 2.0.0
 
 Copyright 2012-2013 Continuuity,Inc. All Rights Reserved.
 ================================================================================
@@ -13,61 +13,24 @@ To install and use Reactor and the included examples there are a few simple
 prerequisites:
 
   1. JDK 6 (required to run Reactor, note: $JAVA_HOME should be set)
-  2. Node.js 0.8.1+ (required to run the Reactor Dashboard)
+  2. Node.js 0.8.16+ (required to run the Reactor Dashboard)
   3. Ant 1.8+ (required to build the example applications)
 
 Once you have installed the prerequisites, you should unzip the Developer Suite
 distribution to a suitable directory. E.g.
 
   %> cd ~/Projects
-  %> unzip /tmp/continuuity-reactor-development-kit-1.7.3.zip
+  %> unzip /tmp/continuuity-reactor-development-kit-2.0.0.zip
 
-You are now ready to start Reactor. Do so by running the
-'continuuity-reactor' script in the $CONTINUUITY/bin folder. E.g.
+You are now ready to start Reactor. Do so by running the 'continuuity-reactor' 
+script in the $CONTINUUITY/bin folder. E.g.
 
-  %> cd ~/Projects/continuuity-reactor-development-kit-1.7.3
+  %> cd ~/Projects/continuuity-reactor-development-kit-2.0.0
   %> bin/continuuity-reactor start
-
-
-Directory Structure
-===================
-The directory structure for the Reactor Development Kit is shown below.
-
-continuuity-reactor-development-kit-1.7.3
- |-- README                                                         (this file)
- |-- LICENSE                                      (the Developer Suite license)
- |-- continuuity-api-1.7.3.jar                        (the API jar for Reactor)
- |-- continuuity-api-1.7.3-javadoc.jar    (the JavaDoc jar for the Reactor API)
- |-- continuuity-api-1.7.3-source.jar      (the source jar for the Reactor API)
- |-- continuuity-eclipse-plugin-1.7.3.jar          (the Reactor Eclipse Plugin)
- |-- lib                                            (Reactor runtime libraries)
- | |-- continuuity-test-1.7.3.jar              (the Reactor Test Framework jar)
- |-- bin                                              (Execution/Tools Scripts)
- | |-- continuuity-reactor                               (Local Reactor Daemon)
- | |-- data-format                                   (Reactor Data Format Tool)
- | |-- stream-client                               (Command-Line Stream Client)
- | |-- data-client                                (Command-Line Dataset Client)
- | |-- reactor-client                             (Command-Line Reactor Client)
- |-- lib
- |-- docs
- | |-- api                                                       (API JavaDocs)
- |-- conf                                                 (Configuration files)
- | |-- logback.xml                            (Local Reactor Log Configuration)
- | |-- continuuity-site.xml                       (Local Reactor Configuration)
- |-- web-app                                    (Reactor Dashboard application)
- |-- examples                                            (example applications)
- | |-- WordCount                                (Sample Word Count Application)
- | |-- CountAndFilterWords                     (Sample Word Filter Application)
- | |-- CountCounts                          (Sample Number Counter Application)
- | |-- CountOddAndEven                     (Sample Odd/Even Number Application)
- | |-- CountRandom                 (Sample Random Number Generator Application)
- | |-- CountTokens                         (Sample String Counting Application)
- | |-- HelloWorld                              (Sample Hello World Application)
- | |-- Purchase                 (Sample Purchase History MapReduce Application)
- | |-- SimpleWriteAndRead                    (Sample Dataset using Application)
- | |-- build.xml                          (Ant build.xml for building examples)
+  %> bin/run-example SentimentAnalysis
 
 Further Information
 ===================
-Further information covering the core concepts for developing applications for
-the Reactor platform can be found in Continuuity-Reactor-Developer-Guide-1.7.3.pdf
+Documentation covering the core concepts for developing applications for
+the Reactor platform can be found in Continuuity-Reactor-Developer-Guide-v2.0.0.pdf 
+

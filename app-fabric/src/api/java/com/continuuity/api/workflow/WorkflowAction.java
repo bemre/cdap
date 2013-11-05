@@ -4,7 +4,7 @@
 package com.continuuity.api.workflow;
 
 /**
- * Represents an action that can be executed in a {@link Workflow}. The lifecycle of a {@link WorkflowAction} is
+ * Represents an action that can be executed in a {@link Workflow}. The lifecycle of a {@link WorkflowAction} is:
  *
  * <pre>
  * try {
@@ -21,7 +21,7 @@ package com.continuuity.api.workflow;
 public interface WorkflowAction extends Runnable {
 
   /**
-   * Provides a specification about this {@link WorkflowAction}.
+   * Provides a specification for this {@link WorkflowAction}.
    *
    * @return An instance of {@link WorkflowSpecification}.
    */
@@ -38,7 +38,7 @@ public interface WorkflowAction extends Runnable {
   void initialize(WorkflowContext context) throws Exception;
 
   /**
-   * This method will be called after the {@link #run} method completes and it can be used for resource cleanup.
+   * This method is called after the {@link #run} method completes and it can be used for resource cleanup. 
    * Any exception thrown only gets logged but does not affect execution of the {@link Workflow}.
    */
   void destroy();
