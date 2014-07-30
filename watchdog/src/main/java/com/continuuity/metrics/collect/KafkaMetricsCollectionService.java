@@ -7,13 +7,16 @@ import com.continuuity.common.io.BinaryEncoder;
 import com.continuuity.common.io.Encoder;
 import com.continuuity.common.metrics.MetricsScope;
 import com.continuuity.internal.io.DatumWriter;
-import com.continuuity.kafka.client.KafkaClientService;
-import com.continuuity.kafka.client.KafkaPublisher;
 import com.continuuity.metrics.MetricsConstants;
 import com.continuuity.metrics.transport.MetricsRecord;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 import com.google.inject.name.Named;
+import org.apache.twill.kafka.client.Compression;
+import org.apache.twill.kafka.client.KafkaClient;
+import org.apache.twill.kafka.client.KafkaPublisher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
@@ -25,8 +28,9 @@ import java.util.Iterator;
  */
 @Singleton
 public final class KafkaMetricsCollectionService extends AggregatedMetricsCollectionService {
+  private static final Logger LOG = LoggerFactory.getLogger(KafkaMetricsCollectionService.class);
 
-  private final KafkaClientService kafkaClient;
+  private final KafkaClient kafkaClient;
   private final String topicPrefix;
   private final KafkaPublisher.Ack ack;
   private final DatumWriter<MetricsRecord> recordWriter;
@@ -36,13 +40,13 @@ public final class KafkaMetricsCollectionService extends AggregatedMetricsCollec
   private KafkaPublisher publisher;
 
   @Inject
-  public KafkaMetricsCollectionService(KafkaClientService kafkaClient,
+  public KafkaMetricsCollectionService(KafkaClient kafkaClient,
                                        @Named(MetricsConstants.ConfigKeys.KAFKA_TOPIC_PREFIX) String topicPrefix,
                                        DatumWriter<MetricsRecord> recordWriter) {
     this(kafkaClient, topicPrefix, KafkaPublisher.Ack.FIRE_AND_FORGET, recordWriter);
   }
 
-  public KafkaMetricsCollectionService(KafkaClientService kafkaClient, String topicPrefix,
+  public KafkaMetricsCollectionService(KafkaClient kafkaClient, String topicPrefix,
                                        KafkaPublisher.Ack ack, DatumWriter<MetricsRecord> recordWriter) {
     this.kafkaClient = kafkaClient;
     this.topicPrefix = topicPrefix;
@@ -56,11 +60,16 @@ public final class KafkaMetricsCollectionService extends AggregatedMetricsCollec
 
   @Override
   protected void startUp() throws Exception {
-    publisher = kafkaClient.getPublisher(ack);
+    getPublisher();
   }
 
   @Override
   protected void publish(MetricsScope scope, Iterator<MetricsRecord> metrics) throws Exception {
+    KafkaPublisher publisher = getPublisher();
+    if (publisher == null) {
+      LOG.warn("Unable to get kafka publisher, will not be able to publish metrics.");
+      return;
+    }
     encoderOutputStream.reset();
 
     KafkaPublisher.Preparer preparer = publisher.prepare(topicPrefix + "." + scope.name().toLowerCase());
@@ -73,5 +82,18 @@ public final class KafkaMetricsCollectionService extends AggregatedMetricsCollec
     }
 
     preparer.send();
+  }
+
+  private KafkaPublisher getPublisher() {
+    if (publisher != null) {
+      return publisher;
+    }
+    try {
+      publisher = kafkaClient.getPublisher(ack, Compression.SNAPPY);
+    } catch (IllegalStateException e) {
+      // can happen if there are no kafka brokers because the kafka server is down.
+      publisher = null;
+    }
+    return publisher;
   }
 }

@@ -1,15 +1,16 @@
 package com.continuuity.common.zookeeper.election;
 
-import com.continuuity.weave.common.Cancellable;
-import com.continuuity.weave.common.Threads;
-import com.continuuity.weave.zookeeper.NodeChildren;
-import com.continuuity.weave.zookeeper.OperationFuture;
-import com.continuuity.weave.zookeeper.ZKClient;
 import com.google.common.base.Charsets;
 import com.google.common.base.Optional;
-import com.google.common.base.Stopwatch;
+import com.google.common.util.concurrent.AbstractService;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
+import com.google.common.util.concurrent.SettableFuture;
+import org.apache.twill.common.Threads;
+import org.apache.twill.zookeeper.NodeChildren;
+import org.apache.twill.zookeeper.OperationFuture;
+import org.apache.twill.zookeeper.ZKClient;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.WatchedEvent;
@@ -23,14 +24,16 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Performs leader election as specified in
  * <a href="http://zookeeper.apache.org/doc/trunk/recipes.html#sc_leaderElection">Zookeeper recipes</a>.
+ *
+ * It will enter the leader election process when {@link #start()} is called and leave the process when
+ * {@link #stop()} is invoked.
  */
-public final class LeaderElection implements Cancellable {
+public final class LeaderElection extends AbstractService {
+
   private static final Logger LOG = LoggerFactory.getLogger(LeaderElection.class);
 
   private enum State {
@@ -40,23 +43,29 @@ public final class LeaderElection implements Cancellable {
     CANCELLED
   }
 
-  private final String guid = UUID.randomUUID().toString();
+  private final String guid;
 
   private final ZKClient zkClient;
   private final String zkFolderPath;
   private final ElectionHandler handler;
-  private final ExecutorService executor;
+
+  private ExecutorService executor;
   private String zkNodePath;
   private State state;
 
   public LeaderElection(ZKClient zkClient, String prefix, ElectionHandler handler) {
+    this.guid = UUID.randomUUID().toString();
     this.zkClient = zkClient;
     this.zkFolderPath = prefix.startsWith("/") ? prefix : "/" + prefix;
-    this.executor = Executors.newSingleThreadExecutor(
-      Threads.createDaemonThreadFactory("leader-election-" + prefix.replace('/', '-')));
     this.handler = handler;
+  }
 
-    LOG.info("Using guid {}", guid);
+  @Override
+  protected void doStart() {
+    LOG.info("Start leader election on {}{} with guid {}", zkClient.getConnectString(), zkFolderPath, guid);
+
+    executor = Executors.newSingleThreadExecutor(
+      Threads.createDaemonThreadFactory("leader-election" + zkFolderPath.replace('/', '-')));
 
     executor.execute(new Runnable() {
       @Override
@@ -65,10 +74,24 @@ public final class LeaderElection implements Cancellable {
         LeaderElection.this.zkClient.addConnectionWatcher(wrapWatcher(new ConnectionWatcher()));
       }
     });
+    notifyStarted();
   }
 
   @Override
-  public void cancel() {
+  protected void doStop() {
+    final SettableFuture<String> completion = SettableFuture.create();
+    Futures.addCallback(completion, new FutureCallback<String>() {
+      @Override
+      public void onSuccess(String result) {
+        notifyStopped();
+      }
+
+      @Override
+      public void onFailure(Throwable t) {
+        notifyFailed(t);
+      }
+    }, Threads.SAME_THREAD_EXECUTOR);
+
     executor.execute(new Runnable() {
       @Override
       public void run() {
@@ -78,37 +101,10 @@ public final class LeaderElection implements Cancellable {
             becomeFollower();
           }
           state = State.CANCELLED;
-          deleteNode();
+          doDeleteNode(completion);
         }
       }
     });
-  }
-
-  /**
-   * Cancels election and waits until state has reached CANCELLED.
-   * @param timeout Timeout in milliseconds to wait for completion.
-   * @throws TimeoutException If timeout ran out before reaching cancelled state.
-   */
-  public void cancelAndWait(long timeout) throws TimeoutException {
-    cancel();
-
-    Stopwatch timer = new Stopwatch().start();
-    boolean interrupted = false;
-    while (state != State.CANCELLED) {
-      if (timer.elapsedMillis() > timeout) {
-        throw new TimeoutException("Timed out waiting for cancel to complete after " + timer.elapsedMillis() +
-                                   " milliseconds");
-      }
-      try {
-        TimeUnit.MILLISECONDS.sleep(100);
-      } catch (InterruptedException ie) {
-        interrupted = true;
-      }
-    }
-    if (interrupted) {
-      // restore interrupted status
-      Thread.currentThread().interrupt();
-    }
   }
 
   private byte[] getNodeData() {
@@ -207,7 +203,7 @@ public final class LeaderElection implements Cancellable {
       handler.leader();
     } catch (Throwable t) {
       LOG.warn("Exception thrown when calling leader() method. Withdraw from the leader election process.", t);
-      cancel();
+      stop();
     }
   }
 
@@ -218,7 +214,7 @@ public final class LeaderElection implements Cancellable {
       handler.follower();
     } catch (Throwable t) {
       LOG.warn("Exception thrown when calling follower() method. Withdraw from the leader election process.", t);
-      cancel();
+      stop();
     }
   }
 
@@ -243,12 +239,23 @@ public final class LeaderElection implements Cancellable {
     }, executor);
   }
 
-  private void deleteNode() {
-    if (zkNodePath != null) {
+  private ListenableFuture<String> deleteNode() {
+    SettableFuture<String> completion = SettableFuture.create();
+    doDeleteNode(completion);
+    return completion;
+  }
+
+  private void doDeleteNode(final SettableFuture<String> completion) {
+    if (zkNodePath == null) {
+      completion.set(null);
+      return;
+    }
+    try {
       Futures.addCallback(zkClient.delete(zkNodePath), new FutureCallback<String>() {
         @Override
         public void onSuccess(String result) {
           LOG.debug("Node deleted: {}", result);
+          completion.set(result);
         }
 
         @Override
@@ -256,10 +263,15 @@ public final class LeaderElection implements Cancellable {
           LOG.warn("Fail to delete node: {}", zkNodePath);
           if (!(t instanceof KeeperException.NoNodeException)) {
             LOG.debug("Retry delete node: {}", zkNodePath);
-            deleteNode();
+            doDeleteNode(completion);
+          } else {
+            completion.setException(t);
           }
         }
       }, executor);
+    } catch (Throwable t) {
+      // If any exception happens when calling delete, treats it as completed with failure.
+      completion.setException(t);
     }
   }
 

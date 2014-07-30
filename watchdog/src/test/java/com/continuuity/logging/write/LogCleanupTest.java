@@ -1,6 +1,7 @@
 package com.continuuity.logging.write;
 
 import com.continuuity.common.conf.CConfiguration;
+import com.continuuity.common.io.Locations;
 import com.continuuity.common.logging.LoggingContext;
 import com.continuuity.data.DataSetAccessor;
 import com.continuuity.data.InMemoryDataSetAccessor;
@@ -10,21 +11,24 @@ import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
 import com.continuuity.data2.transaction.inmemory.InMemoryTxSystemClient;
 import com.continuuity.logging.context.FlowletLoggingContext;
 import com.continuuity.logging.save.LogSaver;
-import com.continuuity.weave.filesystem.LocalLocationFactory;
-import com.continuuity.weave.filesystem.Location;
-import com.continuuity.weave.filesystem.LocationFactory;
+import com.continuuity.logging.save.LogSaverTableUtil;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.twill.filesystem.LocalLocationFactory;
+import org.apache.twill.filesystem.Location;
+import org.apache.twill.filesystem.LocationFactory;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
@@ -37,18 +41,23 @@ public class LogCleanupTest {
   private static final Logger LOG = LoggerFactory.getLogger(LogCleanupTest.class);
 
   @ClassRule
-  public static final TemporaryFolder tempFolder = new TemporaryFolder();
+  public static final TemporaryFolder TEMP_FOLDER = new TemporaryFolder();
 
   private static final int RETENTION_DURATION_MS = 100000;
 
-  private final LocationFactory locationFactory = new LocalLocationFactory();
+  private static LocationFactory locationFactory;
+
+  @BeforeClass
+  public static void init() throws IOException {
+    locationFactory = new LocalLocationFactory(TEMP_FOLDER.newFolder());
+  }
 
   @Test
   public void testCleanup() throws Exception {
     CConfiguration cConf = CConfiguration.create();
 
     DataSetAccessor dataSetAccessor = new InMemoryDataSetAccessor(cConf);
-    OrderedColumnarTable metaTable = LogSaver.getMetaTable(dataSetAccessor);
+    OrderedColumnarTable metaTable = new LogSaverTableUtil(dataSetAccessor).getMetaTable();
 
     InMemoryTransactionManager txManager = new InMemoryTransactionManager();
     txManager.startAndWait();
@@ -56,7 +65,7 @@ public class LogCleanupTest {
     FileMetaDataManager fileMetaDataManager = new FileMetaDataManager(metaTable, txClient, locationFactory);
 
     // Create base dir
-    Location baseDir = locationFactory.create(tempFolder.newFolder().toURI());
+    Location baseDir = locationFactory.create(TEMP_FOLDER.newFolder().toURI());
 
     // Deletion boundary
     long deletionBoundary = System.currentTimeMillis() - RETENTION_DURATION_MS;
@@ -100,9 +109,7 @@ public class LogCleanupTest {
 
     Assert.assertEquals(toDelete.size() + notDelete.size(), fileMetaDataManager.listFiles(dummyContext).size());
 
-    LogCleanup logCleanup = new LogCleanup(locationFactory, fileMetaDataManager,
-                                           baseDir,
-                                           RETENTION_DURATION_MS);
+    LogCleanup logCleanup = new LogCleanup(fileMetaDataManager, baseDir, RETENTION_DURATION_MS);
     logCleanup.run();
     logCleanup.run();
 
@@ -125,7 +132,7 @@ public class LogCleanupTest {
     FileSystem fileSystem = FileSystem.get(new Configuration());
 
     // Create base dir
-    Location baseDir = locationFactory.create(tempFolder.newFolder().toURI());
+    Location baseDir = locationFactory.create(TEMP_FOLDER.newFolder().toURI());
 
     // Create dirs with files
     Set<Location> files = Sets.newHashSet();
@@ -160,8 +167,7 @@ public class LogCleanupTest {
       emptyDirs.add(createDir(baseDir.append("def/hij/dir_" + i)));
     }
 
-    LogCleanup logCleanup = new LogCleanup(locationFactory, null, baseDir,
-                                           RETENTION_DURATION_MS);
+    LogCleanup logCleanup = new LogCleanup(null, baseDir, RETENTION_DURATION_MS);
     for (Location location : Sets.newHashSet(Iterables.concat(nonEmptyDirs, emptyDirs))) {
       logCleanup.deleteEmptyDir(location);
     }
@@ -187,20 +193,24 @@ public class LogCleanupTest {
     FileSystem fileSystem = FileSystem.get(new Configuration());
 
     // Create base dir
-    Location baseDir = locationFactory.create(tempFolder.newFolder().toURI());
+    Location baseDir = locationFactory.create(TEMP_FOLDER.newFolder().toURI());
 
-    LogCleanup logCleanup = new LogCleanup(locationFactory, null, baseDir, RETENTION_DURATION_MS);
+    LogCleanup logCleanup = new LogCleanup(null, baseDir, RETENTION_DURATION_MS);
 
     logCleanup.deleteEmptyDir(baseDir);
     // Assert base dir exists
     Assert.assertTrue(baseDir.exists());
 
     Location rootPath = locationFactory.create("/");
+    rootPath.mkdirs();
+    Assert.assertTrue(rootPath.exists());
     logCleanup.deleteEmptyDir(rootPath);
     // Assert root still exists
     Assert.assertTrue(rootPath.exists());
 
     Location tmpPath = locationFactory.create("/tmp");
+    tmpPath.mkdirs();
+    Assert.assertTrue(tmpPath.exists());
     logCleanup.deleteEmptyDir(tmpPath);
     // Assert tmp still exists
     Assert.assertTrue(tmpPath.exists());
@@ -209,7 +219,7 @@ public class LogCleanupTest {
   }
 
   private Location createFile(Location path) throws Exception {
-    Location parent = LocationUtils.getParent(locationFactory, path);
+    Location parent = Locations.getParent(path);
     parent.mkdirs();
 
     path.createNew();

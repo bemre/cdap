@@ -1,12 +1,11 @@
 package com.continuuity.internal.app.runtime.batch;
 
+import com.continuuity.common.conf.Constants;
 import com.continuuity.common.metrics.MetricsCollector;
 import com.continuuity.common.metrics.MetricsScope;
 import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Table;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import org.apache.hadoop.mapreduce.Counter;
 import org.apache.hadoop.mapreduce.Counters;
 import org.apache.hadoop.mapreduce.Job;
@@ -35,14 +34,14 @@ public class MapReduceMetricsWriter {
   private final BasicMapReduceContext context;
   private final Table<MetricsScope, String, Integer> previousMapStats;
   private final Table<MetricsScope, String, Integer> previousReduceStats;
-  private final JsonParser parser;
+  private final Table<MetricsScope, String, Integer> previousDatasetStats;
 
   public MapReduceMetricsWriter(Job jobConf, BasicMapReduceContext context) {
     this.jobConf = jobConf;
     this.context = context;
     this.previousMapStats = HashBasedTable.create();
     this.previousReduceStats = HashBasedTable.create();
-    this.parser = new JsonParser();
+    this.previousDatasetStats = HashBasedTable.create();
   }
 
   public void reportStats() throws IOException, InterruptedException {
@@ -107,14 +106,32 @@ public class MapReduceMetricsWriter {
   // report continuuity stats coming from user metrics or dataset operations
   private void reportContinuuityStats() throws IOException, InterruptedException {
     Counters counters = jobConf.getCounters();
-    for (MetricsScope scope : MetricsScope.values()) {
-      String group = "continuuity.mapper." + scope.name();
-      reportContinuuityStats(counters.getGroup(group),
-                             context.getSystemMapperMetrics(scope), scope, previousMapStats);
+    for (String group : counters.getGroupNames()) {
+      if (group.startsWith("continuuity.")) {
+        String[] parts = group.split("\\.");
+        String scopePart = parts[parts.length - 1];
+        // last one should be scope
+        MetricsScope scope;
+        try {
+          scope = MetricsScope.valueOf(scopePart);
+        } catch (IllegalArgumentException e) {
+          // SHOULD NEVER happen, simply skip if happens
+          continue;
+        }
 
-      group = "continuuity.reducer." + scope.name();
-      reportContinuuityStats(counters.getGroup(group),
-                             context.getSystemReducerMetrics(scope), scope, previousReduceStats);
+        //TODO: Refactor to support any context
+        String programPart = parts[1];
+        if (programPart.equals("mapper")) {
+          reportContinuuityStats(counters.getGroup(group), context.getSystemMapperMetrics(scope), scope,
+                                 previousMapStats);
+        } else if (programPart.equals("reducer")) {
+          reportContinuuityStats(counters.getGroup(group), context.getSystemReducerMetrics(scope), scope,
+                                 previousReduceStats);
+        } else if (programPart.equals("dataset")) {
+          reportContinuuityStats(counters.getGroup(group), context.getMetricsCollectionService().getCollector(
+            scope, Constants.Metrics.DATASET_CONTEXT, "0"), scope, previousDatasetStats);
+        }
+      }
     }
   }
 
@@ -134,27 +151,28 @@ public class MapReduceMetricsWriter {
       // mapred counters are running counters whereas our metrics timeseries and aggregates make more
       // sense as incremental numbers.  So we want to subtract the current counter value from the previous before
       // emitting to the metrics system.
-      int emit_value = calcDiffAndSetTableValue(previousStats, scope, counter.getName(), counter.getValue());
+      int emitValue = calcDiffAndSetTableValue(previousStats, scope, counter.getName(), counter.getValue());
 
-      // json object with "metric":[metricname] and optionally "tag":[tagname]
-      JsonObject counterObj = (JsonObject) parser.parse(counter.getName());
-      String metric = counterObj.get("metric").getAsString();
-      if (counterObj.has("tag")) {
-        String tag = counterObj.get("tag").getAsString();
-        collector.gauge(metric, emit_value, tag);
+      // "<metric>" or "<metric>,<tag>" if tag is present
+      String[] parts = counter.getName().split(",", 2);
+      String metric = parts[0];
+      if (parts.length == 2) {
+        // has tag
+        String tag = parts[1];
+        collector.gauge(metric, emitValue, tag);
         int tagCountSoFar = (metricTagValues.containsKey(metric)) ? metricTagValues.get(metric) : 0;
-        metricTagValues.put(metric, tagCountSoFar + emit_value);
+        metricTagValues.put(metric, tagCountSoFar + emitValue);
       } else {
-        metricUntaggedValues.put(metric, emit_value);
+        metricUntaggedValues.put(metric, emitValue);
       }
     }
 
     // emit adjusted counts for the untagged metrics.
     for (Map.Entry<String, Integer> untaggedEntry : metricUntaggedValues.entrySet()) {
       String metric = untaggedEntry.getKey();
-      int tag_value_sum = (metricTagValues.containsKey(metric)) ? metricTagValues.get(metric) : 0;
-      int adjusted_value = untaggedEntry.getValue() - tag_value_sum;
-      collector.gauge(metric, adjusted_value);
+      int tagValueSum = (metricTagValues.containsKey(metric)) ? metricTagValues.get(metric) : 0;
+      int adjustedValue = untaggedEntry.getValue() - tagValueSum;
+      collector.gauge(metric, adjustedValue);
     }
   }
 

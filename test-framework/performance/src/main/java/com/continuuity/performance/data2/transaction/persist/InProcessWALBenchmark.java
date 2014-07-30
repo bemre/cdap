@@ -1,7 +1,7 @@
 package com.continuuity.performance.data2.transaction.persist;
 
 import com.continuuity.common.conf.CConfiguration;
-import com.continuuity.common.conf.Constants;
+import com.continuuity.data2.transaction.TxConstants;
 import com.continuuity.data2.transaction.inmemory.ChangeId;
 import com.continuuity.data2.transaction.persist.HDFSTransactionStateStorage;
 import com.continuuity.data2.transaction.persist.TransactionEdit;
@@ -75,7 +75,7 @@ public class InProcessWALBenchmark extends SimpleBenchmark {
 
     Path walPath = new Path(pathForWAL);
     CConfiguration conf = CConfiguration.create();
-    conf.set(Constants.Transaction.Manager.CFG_TX_SNAPSHOT_DIR, walPath.toString());
+    conf.set(TxConstants.Manager.CFG_TX_SNAPSHOT_DIR, walPath.toString());
     Configuration hConfig = new Configuration();
     txStorage = new HDFSTransactionStateStorage(conf, hConfig);
     txStorage.startAndWait();
@@ -181,7 +181,8 @@ public class InProcessWALBenchmark extends SimpleBenchmark {
         switch (nextType) {
           case INPROGRESS:
             edits.add(
-              TransactionEdit.createStarted(writePointer, System.currentTimeMillis() + 300000L, writePointer + 1));
+              TransactionEdit.createStarted(writePointer, writePointer - 1,
+                                            System.currentTimeMillis() + 300000L, writePointer + 1));
             break;
           case COMMITTING:
             edits.add(TransactionEdit.createCommitting(writePointer, generateChangeSet(changeSetSize)));

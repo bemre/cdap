@@ -2,12 +2,14 @@ package com.continuuity.archive;
 
 import com.continuuity.WebCrawlApp;
 import com.continuuity.app.program.ManifestFields;
-import com.continuuity.weave.filesystem.LocalLocationFactory;
-import com.continuuity.weave.filesystem.Location;
-import com.continuuity.weave.filesystem.LocationFactory;
+import com.continuuity.common.lang.jar.JarFinder;
+import com.continuuity.common.lang.jar.JarResources;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.io.ByteStreams;
+import org.apache.twill.filesystem.LocalLocationFactory;
+import org.apache.twill.filesystem.Location;
+import org.apache.twill.filesystem.LocationFactory;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -59,17 +61,17 @@ public class ArchiveBundlerTest {
 
       JarResources oldJar = new JarResources(jarfile);
 
-      boolean found_app_json = false;
+      boolean foundAppJson = false;
       while (entries.hasMoreElements()) {
         JarEntry entry = entries.nextElement();
 
-        if (entry.getName().contains("application.json")){
-          found_app_json = true;
+        if (entry.getName().contains("application.json")) {
+          foundAppJson = true;
         } else if (!entry.isDirectory() && !entry.getName().equals(JarFile.MANIFEST_NAME)) {
           Assert.assertNotNull(oldJar.getResource(entry.getName()));
         }
       }
-      Assert.assertTrue(found_app_json);
+      Assert.assertTrue(foundAppJson);
     } finally {
       out.delete();
     }

@@ -76,7 +76,7 @@ public class AggregatesScanner implements Iterator<AggregatesScanResult> {
         }
 
         // If either no row has been scanned or already exhausted all columns from previous scan, find the next row.
-        ImmutablePair <byte[], Map<byte[], byte[]>> rowResult;
+        ImmutablePair<byte[], Map<byte[], byte[]>> rowResult;
         while ((rowResult = scanner.next()) != null) {
           rowScanned++;
           byte[] rowKey = rowResult.getFirst();
@@ -116,7 +116,7 @@ public class AggregatesScanner implements Iterator<AggregatesScanResult> {
         while (currentTag != null && currentTag.hasNext()) {
           Map.Entry<byte[], byte[]> tagValue = currentTag.next();
           String tag = Bytes.toString(tagValue.getKey());
-          if (!tag.startsWith(tagPrefix)) {
+          if (tagPrefix != null && !tag.startsWith(tagPrefix)) {
             continue;
           }
           if (MetricsConstants.EMPTY_TAG.equals(tag)) {

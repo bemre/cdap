@@ -4,7 +4,6 @@ import com.continuuity.api.Application;
 import com.continuuity.api.ApplicationSpecification;
 import com.continuuity.api.annotation.Handle;
 import com.continuuity.api.annotation.UseDataSet;
-import com.continuuity.data2.OperationException;
 import com.continuuity.api.data.dataset.KeyValueTable;
 import com.continuuity.api.data.stream.Stream;
 import com.continuuity.api.flow.Flow;
@@ -83,7 +82,7 @@ public class AllProgramsApp implements Application {
     @Handle("dummy")
     public void handle(ProcedureRequest request,
                        ProcedureResponder responder)
-      throws OperationException, IOException {
+      throws IOException {
       responder.sendJson("OK");
     }
   }

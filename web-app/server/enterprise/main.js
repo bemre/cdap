@@ -3,7 +3,7 @@
  * Copyright (c) 2013 Continuuity, Inc.
  */
 
-var util = require("util"),
+var util = require('util'),
   fs = require('fs'),
   xml2js = require('xml2js'),
   sys = require('sys'),
@@ -14,6 +14,8 @@ var WebAppServer = require('../common/server');
 
 // The location of continuuity-site.xml
 var CONF_DIRECTORY = '/etc/continuuity/conf';
+// Default port for the Dashboard.
+var DEFAULT_BIND_PORT = 9999;
 
 /**
  * Set environment.
@@ -81,12 +83,16 @@ EntServer.prototype.start = function() {
   self.getConfig(function(version) {
 
     self.server = self.getServerInstance(self.app);
-    self.bindRoutes();
+
+    if (!('dashboard.bind.port' in self.config)) {
+      self.config['dashboard.bind.port'] = DEFAULT_BIND_PORT;
+    }
 
     var clusters = 'webapp.cluster.count' in self.config ? self.config['webapp.cluster.count'] : 2;
 
     self.setEnvironment('enterprise', 'Enterprise Reactor', version, function () {
 
+      self.bindRoutes();
       self.logger.info('I am the master.', cluster.isMaster);
 
       if (cluster.isMaster) {
@@ -95,16 +101,20 @@ EntServer.prototype.start = function() {
         }
 
         cluster.on('online', function (worker) {
-          self.logger.info('worker ' + worker.id + ' was forked.');
+          self.logger.info('Worker ' + worker.id + ' was forked with pid ' + worker.process.pid);
         });
 
         cluster.on('listening', function (worker, address) {
-          self.logger.info('worker ' + worker.id + ' is listening on ' + address.address + ':' +
-            address.port);
+          self.logger.info('Worker ' + worker.id + ' with pid ' + worker.process.pid +
+          ' is listening on ' + address.address + ':' + address.port);
         });
 
         cluster.on('exit', function (worker, code, signal) {
-          self.logger.info('worker ' + worker.process.pid + ' died.');
+          self.logger.info('Worker ' + worker.process.pid + ' died.');
+
+          // Create a new process once one dies.
+          var newWorker = cluster.fork();
+          self.logger.info('Started new worker at ' + newWorker.process.pid);
         });
 
       } else {

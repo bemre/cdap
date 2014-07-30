@@ -7,14 +7,14 @@ package com.continuuity.internal.app.deploy;
 import com.continuuity.ToyApp;
 import com.continuuity.WebCrawlApp;
 import com.continuuity.app.program.Type;
-import com.continuuity.archive.JarFinder;
+import com.continuuity.common.lang.jar.JarFinder;
 import com.continuuity.internal.app.deploy.pipeline.ApplicationWithPrograms;
+import com.continuuity.test.internal.AppFabricTestHelper;
 import com.continuuity.test.internal.DefaultId;
-import com.continuuity.test.internal.TestHelper;
-import com.continuuity.weave.filesystem.LocalLocationFactory;
-import com.continuuity.weave.filesystem.Location;
-import com.continuuity.weave.filesystem.LocationFactory;
 import com.google.common.util.concurrent.ListenableFuture;
+import org.apache.twill.filesystem.LocalLocationFactory;
+import org.apache.twill.filesystem.Location;
+import org.apache.twill.filesystem.LocationFactory;
 import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -41,7 +41,7 @@ public class LocalManagerTest {
     String jar = JarFinder.getJar(WebCrawlApp.class, new Manifest());
     Location deployedJar = lf.create(jar);
     try {
-      TestHelper.getLocalManager().deploy(DefaultId.ACCOUNT, deployedJar).get();
+      AppFabricTestHelper.getLocalManager().deploy(DefaultId.ACCOUNT, null, deployedJar).get();
     } finally {
       deployedJar.delete(true);
     }
@@ -53,10 +53,10 @@ public class LocalManagerTest {
   @Test
   public void testGoodPipeline() throws Exception {
     Location deployedJar = lf.create(
-      JarFinder.getJar(ToyApp.class, TestHelper.getManifestWithMainClass(ToyApp.class))
+      JarFinder.getJar(ToyApp.class, AppFabricTestHelper.getManifestWithMainClass(ToyApp.class))
     );
 
-    ListenableFuture<?> p = TestHelper.getLocalManager().deploy(DefaultId.ACCOUNT, deployedJar);
+    ListenableFuture<?> p = AppFabricTestHelper.getLocalManager().deploy(DefaultId.ACCOUNT, null, deployedJar);
     ApplicationWithPrograms input = (ApplicationWithPrograms) p.get();
 
     Assert.assertEquals(input.getAppSpecLoc().getArchive(), deployedJar);

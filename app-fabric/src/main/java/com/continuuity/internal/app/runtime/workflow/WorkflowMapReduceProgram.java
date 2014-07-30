@@ -3,8 +3,8 @@
  */
 package com.continuuity.internal.app.runtime.workflow;
 
-import com.continuuity.api.ApplicationSpecification;
 import com.continuuity.api.mapreduce.MapReduceSpecification;
+import com.continuuity.app.ApplicationSpecification;
 import com.continuuity.app.Id;
 import com.continuuity.app.program.Program;
 import com.continuuity.app.program.Type;
@@ -27,8 +27,14 @@ public final class WorkflowMapReduceProgram extends ForwardingProgram {
   }
 
   @Override
+  public String getMainClassName() {
+    return mapReduceSpec.getClassName();
+  }
+
+  @SuppressWarnings("unchecked")
+  @Override
   public <T> Class<T> getMainClass() throws ClassNotFoundException {
-    return (Class<T>) Class.forName(mapReduceSpec.getClassName(), true, getClassLoader());
+    return (Class<T>) Class.forName(getMainClassName(), true, getClassLoader());
   }
 
   @Override

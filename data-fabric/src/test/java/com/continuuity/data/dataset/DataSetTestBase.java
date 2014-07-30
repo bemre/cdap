@@ -2,20 +2,25 @@ package com.continuuity.data.dataset;
 
 import com.continuuity.api.data.DataSet;
 import com.continuuity.api.data.DataSetSpecification;
-import com.continuuity.data2.OperationException;
+import com.continuuity.common.conf.CConfiguration;
+import com.continuuity.common.guice.DiscoveryRuntimeModule;
 import com.continuuity.data.DataFabric;
 import com.continuuity.data.DataFabric2Impl;
 import com.continuuity.data.DataSetAccessor;
 import com.continuuity.data.runtime.DataFabricModules;
+import com.continuuity.data.runtime.DataSetsModules;
+import com.continuuity.data2.OperationException;
+import com.continuuity.data2.dataset2.DatasetFramework;
 import com.continuuity.data2.transaction.TransactionContext;
 import com.continuuity.data2.transaction.TransactionSystemClient;
 import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
-import com.continuuity.weave.filesystem.LocalLocationFactory;
-import com.continuuity.weave.filesystem.LocationFactory;
+import com.continuuity.data2.transaction.runtime.TransactionMetricsModule;
 import com.google.common.collect.Lists;
 import com.google.inject.AbstractModule;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
+import org.apache.twill.filesystem.LocalLocationFactory;
+import org.apache.twill.filesystem.LocationFactory;
 import org.junit.BeforeClass;
 
 import java.util.Collections;
@@ -35,15 +40,13 @@ import java.util.List;
 public class DataSetTestBase {
 
   protected static DataFabric fabric;
+  protected static DatasetFramework datasetFramework;
   protected static TransactionSystemClient txSystemClient;
+  protected static CConfiguration configuration;
 
   protected static List<DataSetSpecification> specs;
   protected static DataSetInstantiator instantiator;
 
-  /**
-   * Enum for the transaction agent mode.
-   */
-  protected enum Mode { Sync, Batch, Smart }
   /**
    * Sets up the in-memory data fabric.
    */
@@ -52,18 +55,23 @@ public class DataSetTestBase {
     // use Guice to inject an in-memory tx
     final Injector injector =
       Guice.createInjector(new DataFabricModules().getInMemoryModules(),
+                           new DataSetsModules().getInMemoryModule(),
+                           new DiscoveryRuntimeModule().getInMemoryModules(),
+                           new TransactionMetricsModule(),
                            new AbstractModule() {
                              @Override
                              protected void configure() {
                                bind(LocationFactory.class).to(LocalLocationFactory.class);
                              }
                            });
+    configuration = injector.getInstance(CConfiguration.class);
     injector.getInstance(InMemoryTransactionManager.class).startAndWait();
     txSystemClient = injector.getInstance(TransactionSystemClient.class);
     LocationFactory locationFactory = injector.getInstance(LocationFactory.class);
     DataSetAccessor dataSetAccessor = injector.getInstance(DataSetAccessor.class);
     // and create a data fabric with the default operation context
     fabric = new DataFabric2Impl(locationFactory, dataSetAccessor);
+    datasetFramework = injector.getInstance(DatasetFramework.class);
   }
 
   /**
@@ -85,8 +93,8 @@ public class DataSetTestBase {
       specs.add(dataset.configure());
     }
     // create an instantiator the resulting list of data set specs
-    instantiator = new DataSetInstantiator(fabric, null);
-    instantiator.setDataSets(specs);
+    instantiator = new DataSetInstantiator(fabric, datasetFramework, configuration, null);
+    instantiator.setDataSets(specs, Collections.<DatasetCreationSpec>emptyList());
   }
 
   /**

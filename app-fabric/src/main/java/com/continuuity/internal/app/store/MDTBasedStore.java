@@ -4,13 +4,15 @@
 
 package com.continuuity.internal.app.store;
 
-import com.continuuity.api.ApplicationSpecification;
 import com.continuuity.api.ProgramSpecification;
 import com.continuuity.api.data.DataSetSpecification;
 import com.continuuity.api.data.stream.StreamSpecification;
 import com.continuuity.api.flow.FlowSpecification;
+import com.continuuity.api.flow.FlowletConnection;
 import com.continuuity.api.flow.FlowletDefinition;
 import com.continuuity.api.procedure.ProcedureSpecification;
+import com.continuuity.api.service.ServiceSpecification;
+import com.continuuity.app.ApplicationSpecification;
 import com.continuuity.app.Id;
 import com.continuuity.app.program.Program;
 import com.continuuity.app.program.Programs;
@@ -25,13 +27,15 @@ import com.continuuity.data2.OperationException;
 import com.continuuity.internal.app.ApplicationSpecificationAdapter;
 import com.continuuity.internal.app.ForwardingApplicationSpecification;
 import com.continuuity.internal.app.ForwardingFlowSpecification;
+import com.continuuity.internal.app.ForwardingResourceSpecification;
+import com.continuuity.internal.app.ForwardingRuntimeSpecification;
+import com.continuuity.internal.app.ForwardingTwillSpecification;
 import com.continuuity.internal.app.program.ProgramBundle;
 import com.continuuity.internal.io.ReflectionSchemaGenerator;
 import com.continuuity.internal.procedure.DefaultProcedureSpecification;
+import com.continuuity.internal.service.DefaultServiceSpecification;
 import com.continuuity.metadata.MetaDataEntry;
 import com.continuuity.metadata.MetaDataTable;
-import com.continuuity.weave.filesystem.Location;
-import com.continuuity.weave.filesystem.LocationFactory;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableMap;
@@ -43,6 +47,10 @@ import com.google.common.collect.Table;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import com.google.inject.Inject;
+import org.apache.twill.api.ResourceSpecification;
+import org.apache.twill.api.RuntimeSpecification;
+import org.apache.twill.filesystem.Location;
+import org.apache.twill.filesystem.LocationFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -86,7 +94,7 @@ public class MDTBasedStore implements Store {
    *
    * @param id of the program
    * @param type of program
-   * @return An instance of {@link Program} if found.
+   * @return An instance of {@link Program} if found, null otherwise.
    * @throws IOException
    */
   @Override
@@ -94,7 +102,10 @@ public class MDTBasedStore implements Store {
     try {
       MetaDataEntry entry = metaDataTable.get(new OperationContext(id.getAccountId()), id.getAccountId(),
                                               null, FieldTypes.Application.ENTRY_TYPE, id.getApplicationId());
-      Preconditions.checkNotNull(entry);
+      if (entry == null) {
+        return null;
+      }
+
       String specTimestamp = entry.getTextField(FieldTypes.Application.TIMESTAMP);
       Preconditions.checkNotNull(specTimestamp);
 
@@ -104,7 +115,7 @@ public class MDTBasedStore implements Store {
                                   "Application must be redeployed");
 
       return Programs.create(programLocation);
-    } catch (OperationException e){
+    } catch (OperationException e) {
       throw new IOException(e);
     }
   }
@@ -288,7 +299,7 @@ public class MDTBasedStore implements Store {
     MetaDataEntry existing = metaDataTable.get(context, id.getAccountId(), null,
                                                FieldTypes.Application.ENTRY_TYPE, id.getId());
 
-    if (existing != null){
+    if (existing != null) {
       String json = existing.getTextField(FieldTypes.Application.SPEC_JSON);
       Preconditions.checkNotNull(json);
 
@@ -300,6 +311,7 @@ public class MDTBasedStore implements Store {
                                                                       .putAll(existingAppSpec.getWorkflows())
                                                                       .putAll(existingAppSpec.getFlows())
                                                                       .putAll(existingAppSpec.getProcedures())
+                                                                      .putAll(existingAppSpec.getServices())
                                                                       .build();
 
       ImmutableMap<String, ProgramSpecification> newSpec = new ImmutableMap.Builder<String, ProgramSpecification>()
@@ -307,6 +319,7 @@ public class MDTBasedStore implements Store {
                                                                       .putAll(appSpec.getWorkflows())
                                                                       .putAll(appSpec.getFlows())
                                                                       .putAll(appSpec.getProcedures())
+                                                                      .putAll(appSpec.getServices())
                                                                       .build();
 
 
@@ -502,9 +515,7 @@ public class MDTBasedStore implements Store {
     FlowletDefinition flowletDef = getFlowletDefinitionSafely(flowSpec, flowletId, id);
 
     final FlowletDefinition adjustedFlowletDef = new FlowletDefinition(flowletDef, count);
-    ApplicationSpecification newAppSpec = replaceFlowletInAppSpec(appSpec, id, flowSpec, adjustedFlowletDef);
-
-    return newAppSpec;
+    return replaceFlowletInAppSpec(appSpec, id, flowSpec, adjustedFlowletDef);
   }
 
   @Override
@@ -518,8 +529,6 @@ public class MDTBasedStore implements Store {
   public void setProcedureInstances(Id.Program id, int count) throws OperationException {
     Preconditions.checkArgument(count > 0, "cannot change number of program instances to negative number: " + count);
 
-    long timestamp = System.currentTimeMillis();
-
     ApplicationSpecification appSpec = getAppSpecSafely(id);
     ProcedureSpecification specification = getProcedureSpecSafely(id, appSpec);
 
@@ -532,6 +541,9 @@ public class MDTBasedStore implements Store {
                                                                                  count);
 
     ApplicationSpecification newAppSpec = replaceProcedureInAppSpec(appSpec, id, newSpecification);
+    replaceAppSpecInProgramJar(id, newAppSpec, Type.PROCEDURE);
+
+    long timestamp = System.currentTimeMillis();
     storeAppSpec(id.getApplication(), newAppSpec, timestamp);
 
     LOG.trace("Setting program instances: account: {}, application: {}, procedure: {}, new instances count: {}",
@@ -539,18 +551,101 @@ public class MDTBasedStore implements Store {
 
   }
 
-  private void replaceAppSpecInProgramJar(Id.Program id, ApplicationSpecification appSpec, Type type) {
-    Location programLocation;
-    try {
-      programLocation = getProgramLocation(id, Type.FLOW);
-    } catch (IOException e) {
-      throw Throwables.propagate(e);
+  @Override
+  public int getServiceRunnableInstances(Id.Program id, String runnable) throws OperationException {
+    ApplicationSpecification appSpec = getAppSpecSafely(id);
+    ServiceSpecification serviceSpec = getServiceSpecSafely(id, appSpec);
+    RuntimeSpecification runtimeSpec = serviceSpec.getRunnables().get(runnable);
+    return runtimeSpec.getResourceSpecification().getInstances();
+  }
+
+  @Override
+  public void setServiceRunnableInstances(Id.Program id, String runnable, int count) throws OperationException {
+
+    Preconditions.checkArgument(count > 0, "cannot change number of program instances to negative number: " + count);
+
+    ApplicationSpecification appSpec = getAppSpecSafely(id);
+    ServiceSpecification serviceSpec = getServiceSpecSafely(id, appSpec);
+
+    RuntimeSpecification runtimeSpec = serviceSpec.getRunnables().get(runnable);
+    if (runtimeSpec == null) {
+      throw new IllegalArgumentException(String.format("Runnable not found, app: %s, service: %s, runnable %s",
+                                                       id.getApplication(), id.getId(), runnable));
     }
 
-    ArchiveBundler bundler = new ArchiveBundler(programLocation);
+    ResourceSpecification resourceSpec = replaceInstanceCount(runtimeSpec.getResourceSpecification(), count);
+    RuntimeSpecification newRuntimeSpec = replaceResourceSpec(runtimeSpec, resourceSpec);
 
-    String className = appSpec.getFlows().get(id.getId()).getClassName();
+    Preconditions.checkNotNull(newRuntimeSpec);
+
+    ApplicationSpecification newAppSpec = replaceServiceSpec(appSpec, id.getId(),
+                                                             replaceRuntimeSpec(runnable, serviceSpec, newRuntimeSpec));
+    replaceAppSpecInProgramJar(id, newAppSpec, Type.SERVICE);
+
+    long timestamp = System.currentTimeMillis();
+    storeAppSpec(id.getApplication(), newAppSpec, timestamp);
+
+    LOG.trace("Setting program instances: account: {}, application: {}, service: {}, runnable: {}," +
+              " new instances count: {}",
+              id.getAccountId(), id.getApplicationId(), id.getId(), runnable, count);
+
+  }
+
+  private ResourceSpecification replaceInstanceCount(final ResourceSpecification spec,
+                                                    final int instanceCount) {
+    return new ForwardingResourceSpecification(spec) {
+      @Override
+      public int getInstances() {
+        return instanceCount;
+      }
+    };
+  }
+
+  private RuntimeSpecification replaceResourceSpec(final RuntimeSpecification runtimeSpec,
+                                                   final ResourceSpecification resourceSpec) {
+    return new ForwardingRuntimeSpecification(runtimeSpec) {
+      @Override
+      public ResourceSpecification getResourceSpecification() {
+        return resourceSpec;
+      }
+    };
+  }
+
+  private ApplicationSpecification replaceServiceSpec(final ApplicationSpecification appSpec,
+                                                      final String serviceName,
+                                                      final ServiceSpecification serviceSpecification) {
+    return new ForwardingApplicationSpecification(appSpec) {
+      @Override
+      public Map<String, ServiceSpecification> getServices() {
+        Map<String, ServiceSpecification> services = Maps.newHashMap(super.getServices());
+        services.put(serviceName, serviceSpecification);
+        return services;
+      }
+    };
+  }
+
+  private ServiceSpecification replaceRuntimeSpec(final String runnable, final ServiceSpecification spec,
+                                                  final RuntimeSpecification runtimeSpec) {
+    return new DefaultServiceSpecification(spec.getName(),
+                                           new ForwardingTwillSpecification(spec) {
+                                             @Override
+                                             public Map<String, RuntimeSpecification> getRunnables() {
+                                               Map<String, RuntimeSpecification> specs = Maps.newHashMap(
+                                                                                          super.getRunnables());
+                                               specs.put(runnable, runtimeSpec);
+                                               return specs;
+                                             }
+                                           });
+  }
+
+  private void replaceAppSpecInProgramJar(Id.Program id, ApplicationSpecification appSpec, Type type) {
     try {
+      Location programLocation = getProgramLocation(id, type);
+      ArchiveBundler bundler = new ArchiveBundler(programLocation);
+
+      Program program = Programs.create(programLocation);
+      String className = program.getMainClassName();
+
       Location tmpProgramLocation = programLocation.getTempFile("");
       try {
         ProgramBundle.create(id.getApplication(), bundler, tmpProgramLocation, id.getId(), className, type, appSpec);
@@ -582,7 +677,7 @@ public class MDTBasedStore implements Store {
     return flowletDef;
   }
 
-  private FlowSpecification getFlowSpecSafely(Id.Program id, ApplicationSpecification appSpec) {
+  private static FlowSpecification getFlowSpecSafely(Id.Program id, ApplicationSpecification appSpec) {
     FlowSpecification flowSpec = appSpec.getFlows().get(id.getId());
     if (flowSpec == null) {
       throw new IllegalArgumentException("no such flow @ account id: " + id.getAccountId() +
@@ -592,6 +687,15 @@ public class MDTBasedStore implements Store {
     return flowSpec;
   }
 
+  private ServiceSpecification getServiceSpecSafely(Id.Program id, ApplicationSpecification appSpec) {
+    ServiceSpecification spec = appSpec.getServices().get(id.getId());
+    if (spec == null) {
+      throw new IllegalArgumentException("no such service @ account id: " + id.getAccountId() +
+                                           ", app id: " + id.getApplication() +
+                                           ", service id: " + id.getId());
+    }
+    return spec;
+  }
 
   private ProcedureSpecification getProcedureSpecSafely(Id.Program id, ApplicationSpecification appSpec) {
     ProcedureSpecification procedureSpecification = appSpec.getProcedures().get(id.getId());
@@ -672,7 +776,7 @@ public class MDTBasedStore implements Store {
                                                FieldTypes.ProgramRun.ARGS, id.getId());
     Map<String, String> args = Maps.newHashMap();
     if (existing != null) {
-      java.lang.reflect.Type type = new TypeToken<Map<String, String>>(){}.getType();
+      java.lang.reflect.Type type = new TypeToken<Map<String, String>>() { }.getType();
       args = gson.fromJson(existing.getTextField(FieldTypes.ProgramRun.ENTRY_TYPE), type);
     }
     return args;
@@ -707,6 +811,27 @@ public class MDTBasedStore implements Store {
                                            ", app id: " + id.getApplication().getId());
     }
     return appSpec;
+  }
+
+  private ApplicationSpecification replaceInAppSpec(final ApplicationSpecification appSpec,
+                                                    final Id.Program id,
+                                                    final FlowSpecification flowSpec,
+                                                    final FlowletDefinition adjustedFlowletDef,
+                                                    final List<FlowletConnection> connections) {
+    // as app spec is immutable we have to do this trick
+    return replaceFlowInAppSpec(appSpec, id, new ForwardingFlowSpecification(flowSpec) {
+      @Override
+      public List<FlowletConnection> getConnections() {
+        return connections;
+      }
+
+      @Override
+      public Map<String, FlowletDefinition> getFlowlets() {
+        Map<String, FlowletDefinition> flowlets = Maps.newHashMap(super.getFlowlets());
+        flowlets.put(adjustedFlowletDef.getFlowletSpec().getName(), adjustedFlowletDef);
+        return flowlets;
+      }
+    });
   }
 
   private ApplicationSpecification replaceFlowletInAppSpec(final ApplicationSpecification appSpec,
@@ -821,5 +946,59 @@ public class MDTBasedStore implements Store {
     if (entries.size() > 0) {
       metaDataTable.delete(id.getAccountId(), entries);
     }
+  }
+
+  @Override
+  public void changeFlowletSteamConnection(Id.Program flow, String flowletId, String oldValue, String newValue)
+    throws OperationException {
+
+    Preconditions.checkArgument(flow != null, "flow cannot be null");
+    Preconditions.checkArgument(flowletId != null, "flowletId cannot be null");
+    Preconditions.checkArgument(oldValue != null, "oldValue cannot be null");
+    Preconditions.checkArgument(newValue != null, "newValue cannot be null");
+
+    LOG.trace("Changing flowlet stream connection: account: {}, application: {}, flow: {}, flowlet: {}," +
+                " old coonnected stream: {}, new connected stream: {}",
+               flow.getAccountId(), flow.getApplicationId(), flow.getId(), flowletId, oldValue, newValue);
+
+    ApplicationSpecification appSpec = getAppSpecSafely(flow);
+
+    FlowSpecification flowSpec = getFlowSpecSafely(flow, appSpec);
+
+    boolean adjusted = false;
+    List<FlowletConnection> conns = Lists.newArrayList();
+    for (FlowletConnection con : flowSpec.getConnections()) {
+      if (FlowletConnection.Type.STREAM == con.getSourceType() &&
+          flowletId.equals(con.getTargetName()) &&
+          oldValue.equals(con.getSourceName())) {
+
+        conns.add(new FlowletConnection(con.getSourceType(), newValue, con.getTargetName()));
+        adjusted = true;
+      } else {
+        conns.add(con);
+      }
+    }
+
+    if (!adjusted) {
+      throw new IllegalArgumentException(
+        String.format("Cannot change stream connection to %s, the connection to be changed is not found," +
+          " account: %s, application: %s, flow: %s, flowlet: %s, source stream: %s",
+                      newValue, flow.getAccountId(), flow.getApplicationId(), flow.getId(), flowletId, oldValue));
+    }
+
+    FlowletDefinition flowletDef = getFlowletDefinitionSafely(flowSpec, flowletId, flow);
+    FlowletDefinition newFlowletDef = new FlowletDefinition(flowletDef, oldValue, newValue);
+    ApplicationSpecification newAppSpec = replaceInAppSpec(appSpec, flow, flowSpec, newFlowletDef, conns);
+
+    replaceAppSpecInProgramJar(flow, newAppSpec, Type.FLOW);
+
+    long timestamp = System.currentTimeMillis();
+    storeAppSpec(flow.getApplication(), newAppSpec, timestamp);
+
+    LOG.trace("Changed flowlet stream connection: account: {}, application: {}, flow: {}, flowlet: {}," +
+                " old coonnected stream: {}, new connected stream: {}",
+              flow.getAccountId(), flow.getApplicationId(), flow.getId(), flowletId, oldValue, newValue);
+
+    // todo: change stream "used by" flow mapping in metadata?
   }
 }

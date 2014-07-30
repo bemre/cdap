@@ -3,14 +3,19 @@
  */
 package com.continuuity.app.program;
 
-import com.continuuity.api.ApplicationSpecification;
+import com.continuuity.app.ApplicationSpecification;
 import com.continuuity.app.Id;
-import com.continuuity.weave.filesystem.Location;
+import org.apache.twill.filesystem.Location;
 
 /**
  * Abstraction of a executable program.
  */
 public interface Program {
+
+  /**
+   * Returns the name of the main class in the program.
+   */
+  String getMainClassName();
 
   /**
    * Loads and returns the main class of the program

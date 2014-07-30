@@ -1,9 +1,8 @@
 package com.continuuity.common.options;
 
+import com.continuuity.common.utils.OSDetector;
 import org.junit.Assert;
 import org.junit.Test;
-
-import com.continuuity.common.utils.OSDetector;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -189,7 +188,8 @@ public class OptionsParserTest {
   public void testHelpOverride() {
     HelpOverride myFlags = new HelpOverride();
     ByteArrayOutputStream out = new ByteArrayOutputStream();
-    OptionsParser.init(myFlags, new String[] {"--help", "--foo=bar"}, "OptionsParserTest", "0.1.0", new PrintStream(out));
+    OptionsParser.init(myFlags, new String[] {"--help", "--foo=bar"},
+                       "OptionsParserTest", "0.1.0", new PrintStream(out));
 
     // No usage info should have printed, since we declared our own help flag.
     Assert.assertTrue(out.toString().isEmpty());
@@ -201,7 +201,8 @@ public class OptionsParserTest {
   @Test
   public void testIgnoreAfterDoubleDashMarker() {
     MyFlags myFlags = new MyFlags();
-    OptionsParser.init(myFlags, new String[] {"--flagInt=7", "--", "--flagDefault=foo"}, "OptionsParserTest", "0.1.0", System.out);
+    OptionsParser.init(myFlags, new String[] {"--flagInt=7", "--", "--flagDefault=foo"},
+                       "OptionsParserTest", "0.1.0", System.out);
 
     Assert.assertEquals(7, myFlags.flagInt);
     // flagDefault should not have changed, since it was after the "--".

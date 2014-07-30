@@ -5,6 +5,7 @@ package com.continuuity;
 
 import com.continuuity.app.guice.AppFabricServiceRuntimeModule;
 import com.continuuity.app.guice.ProgramRunnerRuntimeModule;
+import com.continuuity.app.guice.ServiceStoreModules;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.conf.Constants;
 import com.continuuity.common.guice.ConfigModule;
@@ -12,28 +13,44 @@ import com.continuuity.common.guice.DiscoveryRuntimeModule;
 import com.continuuity.common.guice.IOModule;
 import com.continuuity.common.guice.LocationRuntimeModule;
 import com.continuuity.common.metrics.MetricsCollectionService;
+import com.continuuity.common.utils.OSDetector;
 import com.continuuity.data.runtime.DataFabricModules;
-import com.continuuity.data2.transaction.inmemory.InMemoryTransactionManager;
+import com.continuuity.data.runtime.DataSetServiceModules;
+import com.continuuity.data.runtime.DataSetsModules;
+import com.continuuity.data.stream.service.StreamHttpService;
+import com.continuuity.data.stream.service.StreamServiceRuntimeModule;
+import com.continuuity.data2.datafabric.dataset.service.DatasetService;
+import com.continuuity.data2.transaction.inmemory.InMemoryTransactionService;
+import com.continuuity.explore.executor.ExploreExecutorService;
+import com.continuuity.explore.guice.ExploreRuntimeModule;
+import com.continuuity.explore.service.ExploreServiceUtils;
+import com.continuuity.gateway.Gateway;
+import com.continuuity.gateway.auth.AuthModule;
 import com.continuuity.gateway.collector.NettyFlumeCollector;
 import com.continuuity.gateway.router.NettyRouter;
 import com.continuuity.gateway.router.RouterModules;
-import com.continuuity.gateway.v2.Gateway;
-import com.continuuity.gateway.v2.runtime.GatewayModules;
+import com.continuuity.gateway.runtime.GatewayModule;
 import com.continuuity.internal.app.services.AppFabricServer;
 import com.continuuity.logging.appender.LogAppenderInitializer;
 import com.continuuity.logging.guice.LoggingModules;
 import com.continuuity.metrics.guice.MetricsClientRuntimeModule;
-import com.continuuity.weave.internal.zookeeper.InMemoryZKServer;
+import com.continuuity.metrics.guice.MetricsHandlerModule;
+import com.continuuity.metrics.query.MetricsQueryService;
+import com.continuuity.passport.http.client.PassportClient;
+import com.continuuity.security.guice.SecurityModules;
+import com.continuuity.security.server.ExternalAuthenticationServer;
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Service;
+import com.google.inject.AbstractModule;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.Module;
+import com.google.inject.Provider;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.mapreduce.counters.Limits;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
 import java.io.PrintStream;
 import java.net.InetAddress;
 import java.util.List;
@@ -46,32 +63,50 @@ public class SingleNodeMain {
   private static final Logger LOG = LoggerFactory.getLogger(SingleNodeMain.class);
 
   private final WebCloudAppService webCloudAppService;
-  private final CConfiguration configuration;
   private final NettyRouter router;
   private final Gateway gatewayV2;
+  private final MetricsQueryService metricsQueryService;
   private final NettyFlumeCollector flumeCollector;
   private final AppFabricServer appFabricServer;
+  private final StreamHttpService streamHttpService;
 
   private final MetricsCollectionService metricsCollectionService;
 
   private final LogAppenderInitializer logAppenderInitializer;
-  private final InMemoryTransactionManager transactionManager;
+  private final InMemoryTransactionService txService;
 
-  private InMemoryZKServer zookeeper;
+  private ExternalAuthenticationServer externalAuthenticationServer;
+  private final DatasetService datasetService;
+
+  private ExploreExecutorService exploreExecutorService;
 
   public SingleNodeMain(List<Module> modules, CConfiguration configuration, String webAppPath) {
-    this.configuration = configuration;
     this.webCloudAppService = new WebCloudAppService(webAppPath);
 
     Injector injector = Guice.createInjector(modules);
-    transactionManager = injector.getInstance(InMemoryTransactionManager.class);
+    txService = injector.getInstance(InMemoryTransactionService.class);
     router = injector.getInstance(NettyRouter.class);
     gatewayV2 = injector.getInstance(Gateway.class);
+    metricsQueryService = injector.getInstance(MetricsQueryService.class);
     flumeCollector = injector.getInstance(NettyFlumeCollector.class);
     appFabricServer = injector.getInstance(AppFabricServer.class);
     logAppenderInitializer = injector.getInstance(LogAppenderInitializer.class);
 
     metricsCollectionService = injector.getInstance(MetricsCollectionService.class);
+    datasetService = injector.getInstance(DatasetService.class);
+
+    streamHttpService = injector.getInstance(StreamHttpService.class);
+
+    boolean securityEnabled = configuration.getBoolean(Constants.Security.CFG_SECURITY_ENABLED);
+    if (securityEnabled) {
+      externalAuthenticationServer = injector.getInstance(ExternalAuthenticationServer.class);
+    }
+
+    boolean exploreEnabled = configuration.getBoolean(Constants.Explore.CFG_EXPLORE_ENABLED);
+    if (exploreEnabled) {
+      ExploreServiceUtils.checkHiveSupportWithoutSecurity(this.getClass().getClassLoader());
+      exploreExecutorService = injector.getInstance(ExploreExecutorService.class);
+    }
 
     Runtime.getRuntime().addShutdownHook(new Thread() {
       @Override
@@ -94,17 +129,10 @@ public class SingleNodeMain {
   protected void startUp(String[] args) throws Exception {
     logAppenderInitializer.initialize();
 
-    File zkDir = new File(configuration.get(Constants.CFG_LOCAL_DATA_DIR) + "/zookeeper");
-    //noinspection ResultOfMethodCallIgnored
-    zkDir.mkdir();
-    zookeeper = InMemoryZKServer.builder().setDataDir(zkDir).build();
-    zookeeper.startAndWait();
-
-    configuration.set(Constants.Zookeeper.QUORUM, zookeeper.getConnectionStr());
-
     // Start all the services.
-    transactionManager.startAndWait();
+    txService.startAndWait();
     metricsCollectionService.startAndWait();
+    datasetService.startAndWait();
 
     Service.State state = appFabricServer.startAndWait();
     if (state != Service.State.RUNNING) {
@@ -112,12 +140,22 @@ public class SingleNodeMain {
     }
 
     gatewayV2.startAndWait();
+    metricsQueryService.startAndWait();
     router.startAndWait();
     flumeCollector.startAndWait();
     webCloudAppService.startAndWait();
+    streamHttpService.startAndWait();
+
+    if (externalAuthenticationServer != null) {
+      externalAuthenticationServer.startAndWait();
+    }
+
+    if (exploreExecutorService != null) {
+      exploreExecutorService.startAndWait();
+    }
 
     String hostname = InetAddress.getLocalHost().getHostName();
-    System.out.println("Continuuity Reactor (tm) started successfully");
+    System.out.println("Continuuity Reactor started successfully");
     System.out.println("Connect to dashboard at http://" + hostname + ":9999");
   }
 
@@ -127,14 +165,36 @@ public class SingleNodeMain {
   public void shutDown() {
     LOG.info("Shutting down reactor...");
 
-    webCloudAppService.stopAndWait();
-    flumeCollector.stopAndWait();
-    router.stopAndWait();
-    gatewayV2.stopAndWait();
-    appFabricServer.stopAndWait();
-    transactionManager.stopAndWait();
-    zookeeper.stopAndWait();
-    logAppenderInitializer.close();
+    try {
+      // order matters: first shut down web app 'cause it will stop working after router is down
+      webCloudAppService.stopAndWait();
+      //  shut down router, gateway and flume, to stop all incoming traffic
+      router.stopAndWait();
+      gatewayV2.stopAndWait();
+      flumeCollector.stopAndWait();
+      // now the stream writer and the explore service (they need tx)
+      streamHttpService.stopAndWait();
+      if (exploreExecutorService != null) {
+        exploreExecutorService.stopAndWait();
+      }
+      // app fabric will also stop all programs
+      appFabricServer.stopAndWait();
+      // all programs are stopped: dataset service, metrics, transactions can stop now
+      datasetService.stopAndWait();
+      metricsQueryService.stopAndWait();
+      txService.stopAndWait();
+      // auth service is on the side anyway
+      if (externalAuthenticationServer != null) {
+        externalAuthenticationServer.stopAndWait();
+      }
+      logAppenderInitializer.close();
+
+    } catch (Throwable e) {
+      LOG.error("Exception during shutdown", e);
+      // we can't do much but exit. Because there was an exception, some non-daemon threads may still be running.
+      // therefore System.exit() won't do it, we need to farce a halt.
+      Runtime.getRuntime().halt(1);
+    }
   }
 
   /**
@@ -155,12 +215,16 @@ public class SingleNodeMain {
     out.println("           The \"node\" executable must be in the system $PATH environment variable");
     out.println("");
     out.println("Usage: ");
-    out.println("  ./continuuity-reactor [options]");
+    if (OSDetector.isWindows()) {
+      out.println("  reactor.bat [options]");
+    } else {
+      out.println("  ./reactor.sh [options]");
+    }
     out.println("");
     out.println("Additional options:");
     out.println("  --web-app-path  Path to web-app");
-    out.println("  --help          To print this message");
     out.println("  --in-memory     To run everything in memory");
+    out.println("  --help          To print this message");
     out.println("");
 
     if (error) {
@@ -186,9 +250,6 @@ public class SingleNodeMain {
         return;
       } else if ("--in-memory".equals(args[0])) {
         inMemory = true;
-      } else if ("--leveldb-disable".equals(args[0])) {
-        // this option overrides a setting that tells if level db can be used for persistence
-        configuration.setBoolean(Constants.CFG_DATA_LEVELDB_ENABLED, false);
       } else if ("--web-app-path".equals(args[0])) {
         webAppPath = args[1];
       } else {
@@ -202,22 +263,39 @@ public class SingleNodeMain {
     Configuration hConf = new Configuration();
     hConf.addResource("mapred-site-local.xml");
     hConf.reloadConfiguration();
-    hConf.set(Constants.CFG_LOCAL_DATA_DIR, configuration.get(Constants.CFG_LOCAL_DATA_DIR));
+    // Due to incredibly stupid design of Limits class, once it is initialized, it keeps its settings. We
+    // want to make sure it uses our settings in this hConf, so we have to force it initialize here before
+    // someone else initializes it.
+    Limits.init(hConf);
+
+    String localDataDir = configuration.get(Constants.CFG_LOCAL_DATA_DIR);
+    hConf.set(Constants.CFG_LOCAL_DATA_DIR, localDataDir);
     hConf.set(Constants.AppFabric.OUTPUT_DIR, configuration.get(Constants.AppFabric.OUTPUT_DIR));
+
+    // Windows specific requirements
+    if (OSDetector.isWindows()) {
+      String userDir = System.getProperty("user.dir");
+      System.load(userDir + "/lib/native/hadoop.dll");
+      hConf.set("hadoop.tmp.dir", userDir + "/" + localDataDir + "/temp");
+    }
 
     //Run gateway on random port and forward using router.
     configuration.setInt(Constants.Gateway.PORT, 0);
 
+    //Run dataset service on random port
     List<Module> modules = inMemory ? createInMemoryModules(configuration, hConf)
                                     : createPersistentModules(configuration, hConf);
 
-    SingleNodeMain main = new SingleNodeMain(modules, configuration, webAppPath);
+    SingleNodeMain main = null;
     try {
+      main = new SingleNodeMain(modules, configuration, webAppPath);
       main.startUp(args);
-    } catch (Exception e) {
+    } catch (Throwable e) {
       System.err.println("Failed to start server. " + e.getMessage());
       LOG.error("Failed to start server", e);
-      main.shutDown();
+      if (main != null) {
+        main.shutDown();
+      }
       System.exit(-2);
     }
   }
@@ -229,15 +307,23 @@ public class SingleNodeMain {
     return ImmutableList.of(
       new ConfigModule(configuration, hConf),
       new IOModule(),
+      new MetricsHandlerModule(),
+      new AuthModule(),
       new DiscoveryRuntimeModule().getInMemoryModules(),
       new LocationRuntimeModule().getInMemoryModules(),
       new AppFabricServiceRuntimeModule().getInMemoryModules(),
       new ProgramRunnerRuntimeModule().getInMemoryModules(),
-      new GatewayModules().getInMemoryModules(),
+      new GatewayModule().getInMemoryModules(),
       new DataFabricModules().getInMemoryModules(),
+      new DataSetsModules().getInMemoryModule(),
+      new DataSetServiceModules().getInMemoryModule(),
       new MetricsClientRuntimeModule().getInMemoryModules(),
       new LoggingModules().getInMemoryModules(),
-      new RouterModules().getInMemoryModules()
+      new RouterModules().getInMemoryModules(),
+      new SecurityModules().getInMemoryModules(),
+      new StreamServiceRuntimeModule().getInMemoryModules(),
+      new ExploreRuntimeModule().getInMemoryModules(),
+      new ServiceStoreModules().getInMemoryModule()
     );
   }
 
@@ -251,20 +337,42 @@ public class SingleNodeMain {
     }
 
     configuration.set(Constants.CFG_DATA_INMEMORY_PERSISTENCE, Constants.InMemoryPersistenceType.LEVELDB.name());
-    configuration.setBoolean(Constants.CFG_DATA_LEVELDB_ENABLED, true);
+
+    String passportUri = configuration.get(Constants.Gateway.CFG_PASSPORT_SERVER_URI);
+    final PassportClient client = passportUri == null || passportUri.isEmpty() ? new PassportClient()
+                                                                               : PassportClient.create(passportUri);
 
     return ImmutableList.of(
+      new AbstractModule() {
+        @Override
+        protected void configure() {
+          bind(PassportClient.class).toProvider(new Provider<PassportClient>() {
+            @Override
+            public PassportClient get() {
+              return client;
+            }
+          });
+        }
+      },
       new ConfigModule(configuration, hConf),
       new IOModule(),
+      new MetricsHandlerModule(),
+      new AuthModule(),
       new DiscoveryRuntimeModule().getSingleNodeModules(),
       new LocationRuntimeModule().getSingleNodeModules(),
       new AppFabricServiceRuntimeModule().getSingleNodeModules(),
       new ProgramRunnerRuntimeModule().getSingleNodeModules(),
-      new GatewayModules().getSingleNodeModules(),
-      new DataFabricModules().getSingleNodeModules(configuration),
+      new GatewayModule().getSingleNodeModules(),
+      new DataFabricModules().getSingleNodeModules(),
+      new DataSetsModules().getLocalModule(),
+      new DataSetServiceModules().getLocalModule(),
       new MetricsClientRuntimeModule().getSingleNodeModules(),
       new LoggingModules().getSingleNodeModules(),
-      new RouterModules().getSingleNodeModules()
+      new RouterModules().getSingleNodeModules(),
+      new SecurityModules().getSingleNodeModules(),
+      new StreamServiceRuntimeModule().getSingleNodeModules(),
+      new ExploreRuntimeModule().getSingleNodeModules(),
+      new ServiceStoreModules().getSingleNodeModule()
     );
   }
 }

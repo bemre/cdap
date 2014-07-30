@@ -18,15 +18,17 @@
 
 package org.apache.hadoop.mapred;
 
-import com.continuuity.archive.JarClassLoader;
-import com.continuuity.archive.JarResources;
+
 import com.continuuity.common.conf.Constants;
+import com.continuuity.common.lang.ApiResourceListHolder;
+import com.continuuity.common.lang.ClassLoaders;
 import com.continuuity.common.lang.CombineClassLoader;
-import com.continuuity.weave.filesystem.LocalLocationFactory;
-import com.continuuity.weave.filesystem.LocationFactory;
+import com.continuuity.common.lang.jar.BundleJarUtil;
+import com.continuuity.common.utils.DirUtils;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.io.Files;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -45,6 +47,8 @@ import org.apache.hadoop.yarn.api.records.LocalResource;
 import org.apache.hadoop.yarn.api.records.LocalResourceType;
 import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.apache.hadoop.yarn.util.FSDownload;
+import org.apache.twill.filesystem.LocalLocationFactory;
+import org.apache.twill.filesystem.LocationFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -61,17 +65,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Random;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * A helper class for managing the distributed cache for {@link LocalJobRunner}.
- * 
+ *
  * Continuuity fix is applied on the ClassLoader so that it doesn't keep opened file when the ClassLoader
  * is pending for GC.
  */
@@ -83,6 +87,7 @@ class LocalDistributedCacheManagerWithFix {
   private List<String> localArchives = new ArrayList<String>();
   private List<String> localFiles = new ArrayList<String>();
   private List<String> localClasspaths = new ArrayList<String>();
+  private List<File> jarExpandDirs = new ArrayList<File>();
 
   private List<File> symlinksCreated = new ArrayList<File>();
 
@@ -106,6 +111,9 @@ class LocalDistributedCacheManagerWithFix {
     Map<String, LocalResource> localResources =
       new LinkedHashMap<String, LocalResource>();
     MRApps.setupDistributedCache(conf, localResources);
+    // Generating unique numbers for FSDownload.
+    AtomicLong uniqueNumberGenerator =
+      new AtomicLong(System.currentTimeMillis());
 
     // Find which resources are to be put on the local classpath
     Map<String, Path> classpaths = new HashMap<String, Path>();
@@ -143,8 +151,10 @@ class LocalDistributedCacheManagerWithFix {
       Path destPath = localDirAllocator.getLocalPathForWrite(".", conf);
       Map<LocalResource, Future<Path>> resourcesToPaths = Maps.newHashMap();
       for (LocalResource resource : localResources.values()) {
-        Callable<Path> download = new FSDownload(localFSFileContext, ugi, conf,
-                                                 destPath, resource, new Random());
+        Callable<Path> download =
+          new FSDownload(localFSFileContext, ugi, conf,
+                         new Path(destPath, Long.toString(uniqueNumberGenerator.incrementAndGet())),
+                         resource);
         Future<Path> future = exec.submit(download);
         resourcesToPaths.put(resource, future);
       }
@@ -192,13 +202,11 @@ class LocalDistributedCacheManagerWithFix {
     // Update the configuration object with localized data.
     if (!localArchives.isEmpty()) {
       conf.set(MRJobConfig.CACHE_LOCALARCHIVES, StringUtils
-        .arrayToString(localArchives.toArray(new String[localArchives
-          .size()])));
+        .arrayToString(localArchives.toArray(new String[localArchives.size()])));
     }
     if (!localFiles.isEmpty()) {
       conf.set(MRJobConfig.CACHE_LOCALFILES, StringUtils
-        .arrayToString(localFiles.toArray(new String[localArchives
-          .size()])));
+        .arrayToString(localFiles.toArray(new String[localArchives.size()])));
     }
     setupCalled = true;
   }
@@ -227,7 +235,7 @@ class LocalDistributedCacheManagerWithFix {
 
   /**
    * Are the resources that should be added to the classpath? 
-   * Should be called after setup().
+   * Should be calle after setup().
    *
    */
   public boolean hasLocalClasspaths() {
@@ -260,7 +268,11 @@ class LocalDistributedCacheManagerWithFix {
           @Override
           public ClassLoader run() {
             try {
-              return new JarClassLoader(new JarResources(lf.create(uri)), parent);
+              File expandDir = Files.createTempDir();
+              jarExpandDirs.add(expandDir);
+              return ClassLoaders.newProgramClassLoader(
+                BundleJarUtil.unpackProgramJar(lf.create(uri), expandDir),
+                ApiResourceListHolder.getResourceList(), parent);
             } catch (IOException e) {
               throw Throwables.propagate(e);
             }
@@ -301,6 +313,13 @@ class LocalDistributedCacheManagerWithFix {
     }
     for (String file : localFiles) {
       localFSFileContext.delete(new Path(file), true);
+    }
+    for (File dir : jarExpandDirs) {
+      try {
+        DirUtils.deleteDirectoryContents(dir);
+      } catch (IOException e) {
+        LOG.warn("Failed to delete jar directory " + dir);
+      }
     }
   }
 }

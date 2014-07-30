@@ -6,10 +6,10 @@ package com.continuuity.internal.pipeline;
 
 import com.continuuity.pipeline.Context;
 import com.continuuity.pipeline.Stage;
-import com.continuuity.weave.common.Threads;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 import com.google.common.util.concurrent.MoreExecutors;
+import org.apache.twill.common.Threads;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
@@ -42,6 +42,7 @@ public final class AsynchronousPipeline<T> extends AbstractPipeline<T> {
    *
    * @param o argument to run the pipeline.
    */
+  @SuppressWarnings("unchecked")
   @Override
   public ListenableFuture<T> execute(final Object o) {
     return service.submit(new Callable<T>() {

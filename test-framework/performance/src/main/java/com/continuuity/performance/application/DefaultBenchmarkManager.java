@@ -4,22 +4,22 @@
 
 package com.continuuity.performance.application;
 
-import com.continuuity.api.ApplicationSpecification;
-import com.continuuity.app.services.AppFabricService;
-import com.continuuity.app.services.AuthToken;
+import com.continuuity.app.ApplicationSpecification;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.queue.QueueName;
 import com.continuuity.data.DataSetAccessor;
+import com.continuuity.data2.dataset2.DatasetFramework;
 import com.continuuity.data2.transaction.TransactionSystemClient;
+import com.continuuity.gateway.handlers.AppFabricHttpHandler;
 import com.continuuity.performance.gateway.stream.MultiThreadedStreamWriter;
 import com.continuuity.test.StreamWriter;
 import com.continuuity.test.internal.DefaultApplicationManager;
 import com.continuuity.test.internal.ProcedureClientFactory;
-import com.continuuity.weave.filesystem.Location;
-import com.continuuity.weave.filesystem.LocationFactory;
 import com.google.common.collect.Sets;
 import com.google.inject.Inject;
 import com.google.inject.assistedinject.Assisted;
+import org.apache.twill.filesystem.Location;
+import org.apache.twill.filesystem.LocationFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,20 +38,20 @@ public class DefaultBenchmarkManager extends DefaultApplicationManager {
   @Inject
   public DefaultBenchmarkManager(LocationFactory locationFactory,
                                  DataSetAccessor dataSetAccessor,
+                                 DatasetFramework datasetFramework,
                                  TransactionSystemClient txSystemClient,
                                  BenchmarkStreamWriterFactory streamWriterFactory,
                                  ProcedureClientFactory procedureClientFactory,
-                                 @Assisted AuthToken token,
                                  @Assisted("accountId") String accountId,
                                  @Assisted("applicationId") String applicationId,
-                                 @Assisted AppFabricService.Iface appFabricServer,
                                  @Assisted Location deployedJar,
-                                 @Assisted ApplicationSpecification appSpec) {
+                                 @Assisted ApplicationSpecification appSpec,
+                                 AppFabricHttpHandler handler) {
     super(locationFactory,
-          dataSetAccessor, txSystemClient,
+          dataSetAccessor, datasetFramework, txSystemClient,
           streamWriterFactory, procedureClientFactory,
-          token, accountId, applicationId,
-          appFabricServer, deployedJar, appSpec);
+          accountId, applicationId,
+          deployedJar, appSpec, handler);
     benchmarkStreamWriterFactory = streamWriterFactory;
     streamWriters = Sets.newHashSet();
   }

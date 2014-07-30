@@ -5,6 +5,7 @@ import com.continuuity.api.data.DataSetContext;
 import com.continuuity.api.data.DataSetSpecification;
 import com.continuuity.api.data.batch.Split;
 import com.continuuity.api.data.batch.SplitReader;
+import com.continuuity.api.data.dataset.DataSetException;
 import com.continuuity.api.data.dataset.table.Delete;
 import com.continuuity.api.data.dataset.table.Get;
 import com.continuuity.api.data.dataset.table.Increment;
@@ -14,22 +15,22 @@ import com.continuuity.api.data.dataset.table.Scanner;
 import com.continuuity.api.data.dataset.table.Table;
 import com.continuuity.common.utils.ImmutablePair;
 import com.continuuity.data.DataFabric;
-import com.continuuity.api.data.dataset.DataSetException;
 import com.continuuity.data2.dataset.api.DataSetManager;
 import com.continuuity.data2.dataset.lib.table.OrderedColumnarTable;
 import com.continuuity.data2.transaction.TransactionAware;
+import com.continuuity.data2.transaction.TxConstants;
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
-import com.google.common.base.Throwables;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 import com.google.common.collect.Maps;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import javax.annotation.Nullable;
 
 /**
  * Base class for runtime implementations of Table.
@@ -58,9 +59,7 @@ public class RuntimeTable extends Table {
   @Override
   public void initialize(DataSetSpecification spec, DataSetContext context) {
     super.initialize(spec, context);
-
-    OrderedColumnarTable tableClient = getOcTable(dataFabric);
-    ocTable = tableClient;
+    ocTable = getOcTable(dataFabric);
   }
 
   // todo: hack
@@ -84,7 +83,9 @@ public class RuntimeTable extends Table {
       // todo: better exception handling?
       // TODO: Will be moving out into DataSet management system.
       if (!dataSetManager.exists(getName())) {
-        dataSetManager.create(getName());
+        Properties props = new Properties();
+        props.put(TxConstants.PROPERTY_TTL, String.valueOf(getTTL()));
+        dataSetManager.create(getName(), props);
       }
     } catch (Exception e) {
       throw Throwables.propagate(e);
@@ -92,6 +93,7 @@ public class RuntimeTable extends Table {
 
     Properties props = new Properties();
     props.put("conflict.level", getConflictLevel().name());
+    props.put(TxConstants.PROPERTY_TTL, String.valueOf(getTTL()));
     return dataFabric.getDataSetClient(getName(), OrderedColumnarTable.class, props);
   }
 
@@ -300,6 +302,12 @@ public class RuntimeTable extends Table {
   @Override
   public SplitReader<byte[], Row> createSplitReader(Split split) {
     return new TableScanner();
+  }
+
+  @Override
+  public void write(byte[] key, Put put) {
+    Preconditions.checkArgument(Bytes.equals(key, put.getRow()), "The key should be the same as row in Put");
+    put(put);
   }
 
   /**

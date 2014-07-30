@@ -3,16 +3,22 @@
  */
 package com.continuuity.metrics.data;
 
-import com.continuuity.data2.OperationException;
 import com.continuuity.common.conf.CConfiguration;
+import com.continuuity.common.conf.Constants;
 import com.continuuity.common.guice.ConfigModule;
+import com.continuuity.common.guice.LocationRuntimeModule;
+import com.continuuity.common.metrics.MetricsCollectionService;
+import com.continuuity.common.metrics.NoOpMetricsCollectionService;
 import com.continuuity.data.runtime.DataFabricLevelDBModule;
+import com.continuuity.data2.OperationException;
+import com.continuuity.data2.transaction.runtime.TransactionMetricsModule;
 import com.continuuity.metrics.MetricsConstants;
 import com.continuuity.metrics.transport.MetricsRecord;
 import com.continuuity.metrics.transport.TagMetric;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import com.google.inject.AbstractModule;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.PrivateModule;
@@ -23,6 +29,7 @@ import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.io.IOException;
 import java.util.List;
 
 /**
@@ -109,12 +116,15 @@ public class TimeSeriesCleanupTest {
   }
 
   @BeforeClass
-  public static void init() {
+  public static void init() throws IOException {
     CConfiguration cConf = CConfiguration.create();
     cConf.set(MetricsConstants.ConfigKeys.TIME_SERIES_TABLE_ROLL_TIME, "300");
+    cConf.set(Constants.CFG_LOCAL_DATA_DIR, tmpFolder.newFolder().getAbsolutePath());
     Injector injector = Guice.createInjector(
+      new LocationRuntimeModule().getInMemoryModules(),
       new DataFabricLevelDBModule(),
       new ConfigModule(cConf),
+      new TransactionMetricsModule(),
       new PrivateModule() {
 
         @Override

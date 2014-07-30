@@ -7,10 +7,10 @@ import com.continuuity.data2.dataset.lib.table.ConflictDetection;
 import com.continuuity.data2.transaction.Transaction;
 import com.google.common.collect.Maps;
 
-import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Map;
 import java.util.NavigableMap;
+import javax.annotation.Nullable;
 
 /**
  *

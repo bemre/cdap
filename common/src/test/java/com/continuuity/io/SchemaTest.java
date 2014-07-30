@@ -1,9 +1,9 @@
 package com.continuuity.io;
 
+import com.continuuity.internal.io.ReflectionSchemaGenerator;
 import com.continuuity.internal.io.Schema;
 import com.continuuity.internal.io.SchemaTypeAdapter;
 import com.continuuity.internal.io.UnsupportedTypeException;
-import com.continuuity.internal.io.ReflectionSchemaGenerator;
 import com.google.common.reflect.TypeToken;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -56,7 +56,7 @@ public class SchemaTest {
 
   @Test
   public void testGenerateSchema() throws UnsupportedTypeException {
-    Schema schema = (new ReflectionSchemaGenerator()).generate((new TypeToken<Child<Node>>() {}).getType());
+    Schema schema = (new ReflectionSchemaGenerator()).generate((new TypeToken<Child<Node>>() { }).getType());
 
     Gson gson = new GsonBuilder()
       .registerTypeAdapter(Schema.class, new SchemaTypeAdapter())
@@ -81,7 +81,7 @@ public class SchemaTest {
     Assert.assertEquals(s1.getSchemaHash(), s2.getSchemaHash());
     Assert.assertEquals(s1, s2);
 
-    Schema schema = (new ReflectionSchemaGenerator()).generate((new TypeToken<Child<Node>>() {}).getType());
+    Schema schema = (new ReflectionSchemaGenerator()).generate((new TypeToken<Child<Node>>() { }).getType());
     Assert.assertNotEquals(s1.getSchemaHash(), schema.getSchemaHash());
   }
 

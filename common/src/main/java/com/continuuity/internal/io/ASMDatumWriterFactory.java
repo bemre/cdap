@@ -1,6 +1,6 @@
 package com.continuuity.internal.io;
 
-import com.continuuity.common.lang.CombineClassLoader;
+import com.continuuity.common.lang.ClassLoaders;
 import com.continuuity.internal.asm.ByteCodeClassLoader;
 import com.continuuity.internal.asm.ClassDefinition;
 import com.google.common.base.Objects;
@@ -8,19 +8,13 @@ import com.google.common.base.Throwables;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import com.google.common.reflect.TypeToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.inject.Inject;
-import java.lang.reflect.ParameterizedType;
-import java.lang.reflect.Type;
 import java.util.Map;
-import java.util.Queue;
-import java.util.Set;
+import javax.inject.Inject;
 
 /**
  * A factory class for creating {@link DatumWriter} instance for different data type and schema.
@@ -48,6 +42,7 @@ public final class ASMDatumWriterFactory implements DatumWriterFactory {
    * @param <T> Type of the data type.
    * @return A {@link DatumWriter} instance.
    */
+  @SuppressWarnings("unchecked")
   @Override
   public <T> DatumWriter<T> create(TypeToken<T> type, Schema schema) {
     try {
@@ -66,59 +61,21 @@ public final class ASMDatumWriterFactory implements DatumWriterFactory {
 
     private final Map<TypeToken<?>, ByteCodeClassLoader> classloaders = Maps.newIdentityHashMap();
 
+    @SuppressWarnings("unchecked")
     @Override
     public Class<DatumWriter<?>> load(CacheKey key) throws Exception {
       ClassDefinition classDef = new DatumWriterGenerator().generate(key.getType(), key.getSchema());
 
-      ClassLoader typeClassloader = getClassLoader(key.getType());
-      ByteCodeClassLoader classloader = classloaders.get(typeClassloader);
+      ClassLoader typeClassloader = ClassLoaders.getClassLoader(key.getType());
+      ByteCodeClassLoader classloader = classloaders.get(key.getType());
       if (classloader == null) {
         classloader = new ByteCodeClassLoader(typeClassloader);
         classloaders.put(key.getType(), classloader);
       }
 
-      return (Class<DatumWriter<?>>) classloader.addClass(classDef).loadClass(classDef.getClassName());
+      return (Class<DatumWriter<?>>) classloader.addClass(classDef, key.getType().getRawType())
+                                                .loadClass(classDef.getClassName());
     }
-  }
-
-  /**
-   * Returns the ClassLoader of the given type. If the given type is a {@link ParameterizedType}, it returns
-   * a {@link CombineClassLoader} of all types.
-   *
-   * @return A new CombineClassLoader. If no ClassLoader is found from the type,
-   *         it returns the current thread context ClassLoader if it's not null, otherwise, return system ClassLoader.
-   */
-  private static ClassLoader getClassLoader(TypeToken<?> type) {
-    Set<ClassLoader> classLoaders = Sets.newIdentityHashSet();
-
-    // Breath first traversal into the Type.
-    Queue<TypeToken<?>> queue = Lists.newLinkedList();
-    queue.add(type);
-    while (!queue.isEmpty()) {
-      type = queue.remove();
-      ClassLoader classLoader = type.getRawType().getClassLoader();
-      if (classLoader != null) {
-        classLoaders.add(classLoader);
-      }
-
-      if (type.getType() instanceof ParameterizedType) {
-        for (Type typeArg : ((ParameterizedType) type.getType()).getActualTypeArguments()) {
-          queue.add(TypeToken.of(typeArg));
-        }
-      }
-    }
-
-    // Optionally add the context ClassLoader
-    ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
-    ClassLoader parent = (contextClassLoader == null) ? ClassLoader.getSystemClassLoader() : contextClassLoader;
-
-    if (classLoaders.isEmpty()) {
-      return parent;
-    }
-    if (classLoaders.size() == 1) {
-      return classLoaders.iterator().next();
-    }
-    return new CombineClassLoader(parent, classLoaders);
   }
 
   private static final class CacheKey {

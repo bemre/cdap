@@ -4,11 +4,10 @@
 
 package com.continuuity.logging.write;
 
-import com.continuuity.weave.filesystem.Location;
-import com.continuuity.weave.filesystem.LocationFactory;
+import com.continuuity.common.io.Locations;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Sets;
-import org.apache.hadoop.ipc.RemoteException;
+import org.apache.twill.filesystem.Location;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,15 +21,12 @@ public final class LogCleanup implements Runnable {
   private static final Logger LOG = LoggerFactory.getLogger(LogCleanup.class);
 
   private final FileMetaDataManager fileMetaDataManager;
-  private final LocationFactory locationFactory;
   private final Location logBaseDir;
   private final long retentionDurationMs;
 
-  public LogCleanup(LocationFactory locationFactory, FileMetaDataManager fileMetaDataManager, Location logBaseDir,
-             long retentionDurationMs) {
-    this.locationFactory = locationFactory;
+  public LogCleanup(FileMetaDataManager fileMetaDataManager, Location logBaseDir, long retentionDurationMs) {
     this.fileMetaDataManager = fileMetaDataManager;
-    this.logBaseDir = LocationUtils.normalize(locationFactory, logBaseDir);
+    this.logBaseDir = logBaseDir;
     this.retentionDurationMs = retentionDurationMs;
 
     LOG.info("Log base dir = {}", logBaseDir.toURI());
@@ -52,8 +48,7 @@ public final class LogCleanup implements Runnable {
                                                 LOG.info(String.format("Deleting log file %s", location.toURI()));
                                                 location.delete();
                                               }
-
-                                              parentDirs.add(LocationUtils.getParent(locationFactory, location));
+                                              parentDirs.add(getParent(location));
                                             } catch (IOException e) {
                                               LOG.error(
                                                 String.format("Got exception when deleting path %s",
@@ -68,9 +63,14 @@ public final class LogCleanup implements Runnable {
         deleteEmptyDir(dir);
       }
 
-    } catch (Throwable e){
+    } catch (Throwable e) {
       LOG.error("Got exception when cleaning up. Will try again later.", e);
     }
+  }
+
+  Location getParent(Location location) {
+    Location parent = Locations.getParent(location);
+    return (parent == null) ? location : parent;
   }
 
   /**
@@ -79,7 +79,6 @@ public final class LogCleanup implements Runnable {
    * @param dir dir to be deleted.
    */
   void deleteEmptyDir(Location dir) {
-    dir = LocationUtils.normalize(locationFactory, dir);
     LOG.debug("Got path {}", dir.toURI());
 
     // Don't delete a dir if it is equal to or a parent of logBaseDir
@@ -90,19 +89,16 @@ public final class LogCleanup implements Runnable {
     }
 
     try {
-      if (dir.delete()) {
+      if (dir.list().isEmpty() && dir.delete()) {
         LOG.info("Deleted empty dir {}", dir.toURI());
 
         // See if parent dir is empty, and needs deleting
-        Location parent = LocationUtils.getParent(locationFactory, dir);
+        Location parent = getParent(dir);
         LOG.debug("Deleting parent dir {}", parent);
         deleteEmptyDir(parent);
       } else {
         LOG.debug("Not deleting non-dir or non-empty dir {}", dir.toURI());
       }
-    } catch (RemoteException e) {
-      // Don't log non-empty dir deletion exception as error, as it is expected.
-      LOG.debug("Got exception while deleting dir {}", dir.toURI(), e);
     } catch (IOException e) {
       LOG.error("Got exception while deleting dir {}", dir.toURI(), e);
     }

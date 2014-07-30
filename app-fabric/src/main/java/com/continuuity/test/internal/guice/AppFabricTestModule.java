@@ -7,19 +7,22 @@ import com.continuuity.api.schedule.Schedule;
 import com.continuuity.app.Id;
 import com.continuuity.app.guice.AppFabricServiceRuntimeModule;
 import com.continuuity.app.guice.ProgramRunnerRuntimeModule;
+import com.continuuity.app.guice.ServiceStoreModules;
 import com.continuuity.app.program.Type;
-import com.continuuity.app.services.AppFabricService;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.guice.ConfigModule;
 import com.continuuity.common.guice.DiscoveryRuntimeModule;
 import com.continuuity.common.guice.IOModule;
+import com.continuuity.common.guice.LocationRuntimeModule;
 import com.continuuity.data.runtime.DataFabricModules;
+import com.continuuity.data.runtime.DataSetServiceModules;
+import com.continuuity.data.runtime.DataSetsModules;
+import com.continuuity.gateway.auth.AuthModule;
 import com.continuuity.internal.app.runtime.schedule.ScheduledRuntime;
 import com.continuuity.internal.app.runtime.schedule.Scheduler;
-import com.continuuity.internal.app.services.DefaultAppFabricService;
+import com.continuuity.logging.guice.LoggingModules;
 import com.continuuity.metrics.guice.MetricsClientRuntimeModule;
-import com.continuuity.weave.filesystem.LocalLocationFactory;
-import com.continuuity.weave.filesystem.LocationFactory;
+import com.continuuity.metrics.guice.MetricsHandlerModule;
 import com.google.common.collect.ImmutableList;
 import com.google.inject.AbstractModule;
 import com.google.inject.PrivateModule;
@@ -46,21 +49,25 @@ public final class AppFabricTestModule extends AbstractModule {
   @Override
   protected void configure() {
     install(new DataFabricModules().getInMemoryModules());
+    install(new DataSetsModules().getInMemoryModule());
+    install(new DataSetServiceModules().getInMemoryModule());
     install(new ConfigModule(cConf, hConf));
     install(new IOModule());
+    install(new AuthModule());
     install(new DiscoveryRuntimeModule().getInMemoryModules());
     install(new AppFabricServiceRuntimeModule().getInMemoryModules());
+    install(new ServiceStoreModules().getInMemoryModule());
     install(new PrivateModule() {
       @Override
       protected void configure() {
         bind(Scheduler.class).annotatedWith(Assisted.class).toInstance(createNoopScheduler());
-        bind(AppFabricService.Iface.class).to(DefaultAppFabricService.class);
-        expose(AppFabricService.Iface.class);
       }
     });
     install(new ProgramRunnerRuntimeModule().getInMemoryModules());
     install(new MetricsClientRuntimeModule().getNoopModules());
-    bind(LocationFactory.class).toInstance(new LocalLocationFactory());
+    install(new LocationRuntimeModule().getInMemoryModules());
+    install(new LoggingModules().getInMemoryModules());
+    install(new MetricsHandlerModule());
   }
 
   private Scheduler createNoopScheduler() {
@@ -92,7 +99,7 @@ public final class AppFabricTestModule extends AbstractModule {
       }
 
       @Override
-      public ScheduleState scheduleState(String scheduleId){
+      public ScheduleState scheduleState(String scheduleId) {
         return ScheduleState.NOT_FOUND;
       }
     };

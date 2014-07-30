@@ -1,11 +1,15 @@
+/*
+ * Copyright 2014 Continuuity,Inc. All Rights Reserved.
+ */
+
 package com.continuuity.data2.dataset.lib.table.hbase;
 
 import com.continuuity.api.common.Bytes;
+import com.continuuity.common.utils.ImmutablePair;
+import com.continuuity.data.operation.StatusCode;
+import com.continuuity.data.table.Scanner;
 import com.continuuity.data2.OperationException;
 import com.continuuity.data2.OperationResult;
-import com.continuuity.api.data.StatusCode;
-import com.continuuity.common.utils.ImmutablePair;
-import com.continuuity.data.table.Scanner;
 import com.continuuity.data2.dataset.lib.table.FuzzyRowFilter;
 import com.continuuity.data2.dataset.lib.table.MetricsTable;
 import com.continuuity.data2.util.hbase.HBaseTableUtil;
@@ -23,11 +27,11 @@ import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.filter.FirstKeyOnlyFilter;
 import org.apache.hadoop.hbase.util.Pair;
 
-import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import javax.annotation.Nullable;
 
 /**
  * An HBase metrics table client.

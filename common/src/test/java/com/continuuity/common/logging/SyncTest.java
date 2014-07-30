@@ -7,7 +7,12 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
-import org.junit.*;
+import org.junit.After;
+import org.junit.Assert;
+import org.junit.Before;
+import org.junit.Ignore;
+import org.junit.Rule;
+import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 import java.io.File;
@@ -54,10 +59,10 @@ public class SyncTest {
     FileSystem fs = FileSystem.get(config);
     // create a file and write n bytes, then sync
     Path path = new Path("/myfile");
-    FSDataOutputStream out = fs.create(path, false, 4096, (short)2, 4096L);
+    FSDataOutputStream out = fs.create(path, false, 4096, (short) 2, 4096L);
     int numBytes = 5000;
     for (int i = 0; i < numBytes; i++) {
-      out.write((byte)i);
+      out.write((byte) i);
     }
     out.hflush();
     // verify the file is there
@@ -69,7 +74,7 @@ public class SyncTest {
     byte[] buffer = new byte[numBytes];
     in.readFully(buffer);
     for (int i = 0; i < numBytes; i++) {
-      Assert.assertEquals((byte)i, buffer[i]);
+      Assert.assertEquals((byte) i, buffer[i]);
     }
     in.close();
     // now close the writer

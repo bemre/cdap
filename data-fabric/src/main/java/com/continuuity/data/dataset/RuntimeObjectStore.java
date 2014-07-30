@@ -4,10 +4,10 @@ import com.continuuity.api.data.DataSetContext;
 import com.continuuity.api.data.DataSetSpecification;
 import com.continuuity.api.data.batch.Split;
 import com.continuuity.api.data.batch.SplitReader;
+import com.continuuity.api.data.dataset.DataSetException;
 import com.continuuity.api.data.dataset.ObjectStore;
 import com.continuuity.common.io.BinaryDecoder;
 import com.continuuity.common.io.BinaryEncoder;
-import com.continuuity.api.data.dataset.DataSetException;
 import com.continuuity.internal.io.DatumWriter;
 import com.continuuity.internal.io.ReflectionDatumReader;
 import com.continuuity.internal.io.ReflectionDatumWriter;
@@ -15,11 +15,11 @@ import com.continuuity.internal.io.UnsupportedTypeException;
 import com.google.common.base.Throwables;
 import com.google.common.reflect.TypeToken;
 
-import javax.annotation.Nullable;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
+import javax.annotation.Nullable;
 
 /**
  * This is the implementation of object store that is injected as the delegate at runtime. It has actual
@@ -42,7 +42,7 @@ public final class RuntimeObjectStore<T> extends ObjectStore<T> {
 
   /**
    * Creates runtime instance of ObjectStore.
-   * @param loader the class loader for the object type (it may be a user-defined type requiring its own clas loader).
+   * @param loader the class loader for the object type (it may be a user-defined type requiring its own class loader).
    *               If null, then the default class loader is used.
    */
   private RuntimeObjectStore(@Nullable ClassLoader loader) throws UnsupportedTypeException {

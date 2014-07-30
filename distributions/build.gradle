@@ -4,6 +4,8 @@ evaluationDependsOn(':passport')
 
 apply plugin:'maven'
 apply from: "$rootProject.projectDir/gradle/packaging.gradle"
+apply from: "$rootProject.projectDir/gradle/run-maven.gradle"
+apply from: "$rootProject.projectDir/gradle/run-sphinx.gradle"
 
 task javadoc(type: Javadoc, overwrite: true) {
   source = project.parent.subprojects.collect { proj ->
@@ -29,8 +31,8 @@ task javadoc(type: Javadoc, overwrite: true) {
   group = 'Documentation'
   description = 'Aggregates API javadocs across all projects.'
   options.windowTitle = "Continuuity Reactor Javadoc ${rootProject.version}"
-  options.bottom = "Copyright 2012-2013 Continuuity,Inc."
-  options.links('http://download.oracle.com/javase/6/docs/api/', 'http://download.oracle.com/javaee/6/api/',
+  options.bottom = "Copyright 2012-2014 Continuuity,Inc."
+  options.links('http://docs.oracle.com/javase/6/docs/api/', 'http://docs.oracle.com/javaee/6/api/',
           'http://hadoop.apache.org/docs/current/api/')
   options.stylesheetFile = new File("$rootProject.projectDir/distributions/src/javadoc/stylesheet.css")
   options.extDirs(new File("$rootProject.projectDir/distributions/src/javadoc/resources"))
@@ -81,12 +83,14 @@ configurations{
 import org.apache.tools.ant.filters.ReplaceTokens
 import org.gradle.api.tasks.bundling.Compression
 
+
 task reactor_sdk_dist (type: Zip, dependsOn: [':web-app:build', ':examples:build']) {
   group = 'Continuuity'
 
   baseName = "continuuity"
-  appendix = "reactor-development-kit"
-  into "${baseName}-${appendix}-${version}"
+  appendix = "sdk"
+  def sdkName = "${baseName}-${appendix}-${version}"
+  into sdkName
   description = 'Generates the singlenode distribution zip file'
 
   from combinedApiJar.outputs
@@ -134,6 +138,16 @@ task reactor_sdk_dist (type: Zip, dependsOn: [':web-app:build', ':examples:build
     into "conf"
   }
 
+  //native
+  from(project(':singlenode').tasks.getByName('stageDllSingleNode').outputs){
+      into "lib/native"
+  }
+
+  //exe
+  from(project(':singlenode').tasks.getByName('stageExeSingleNode').outputs){
+      into "libexec/bin"
+  }
+
   //distribution
   into("lib"){
     from project(':singlenode').configurations.getByName('runtime')
@@ -158,13 +172,20 @@ task reactor_sdk_dist (type: Zip, dependsOn: [':web-app:build', ':examples:build
     exclude "PayvmentDemo/"
     exclude "DependencyRandomNumber/"
     exclude "TwitterScanner/"
-    exclude "ResourceSpammer/"
     exclude "LishApps/"
     exclude "AggregateMetrics/"
     exclude "lib/"
     exclude "build-checkstyle.xml"
     exclude "checkstyle_report.xml"
-    exclude "examples.iml"
+    exclude "**/*.iml"
+    exclude "**/dependency-reduced-pom.xml"
+    exclude "**/.idea/"
+
+    // include only the jar file from target directory for packaging into sdk
+    exclude { it.file.absolutePath.contains('/target/') &&
+                (!it.file.name.endsWith(".jar") || it.file.name.startsWith("original-")) }
+
+    includeEmptyDirs = false
   }
 
   //webapp
@@ -198,6 +219,19 @@ task reactor_sdk_dist (type: Zip, dependsOn: [':web-app:build', ':examples:build
     classifier = ""
   }
   ext.distName = "${baseName}-${appendix}"
+
+  // Verify SDK
+  doLast {
+    copy {
+      from zipTree(outputs.files.singleFile)
+      into temporaryDir
+    }
+
+    def apiJar = new File(temporaryDir, sdkName + "/" + combinedApiJar.outputs.files.singleFile.name)
+    def pomPath = new File(temporaryDir, sdkName + "/examples/pom.xml")
+    def mvnOpts = "-Dcontinuuity-api-jar-path=" + apiJar + " -P build" + "  -f " + pomPath
+    runMaven("clean package", mvnOpts)
+  }
 }
 
 task sandbox_dist (type: Zip) {
@@ -264,6 +298,9 @@ task sandbox_dist (type: Zip) {
   into("web-app/cloud/common"){
     from project(':web-app').file('build/sandbox/common')
   }
+  
+  // Disable nux in sandbox
+  from (".nux_dashboard") 
 
   // VERSION
   from("VERSION"){
@@ -338,6 +375,80 @@ uploadApiArchives {
   }
 }
 
+// Couldn't find a good way to create the zip files for the three examples
+// without having to create three tasks
+task examples_response_analytics (type: Zip) {
+   group='Continuuity'
+   baseName = "continuuity"
+   appendix="ResponseCodeAnalytics"
+   def name = "${baseName}-${appendix}-${version}"
+   into name
+   description='Log analytics application'
+   into("examples") {
+     from "${buildDir}/../../examples/${appendix}"
+   } 
+}
+ 
+// Couldn't find a good way to create the zip files for the three examples
+// without having to create three tasks
+task examples_traffic_analytics (type: Zip) {
+   group='Continuuity'
+   baseName = "continuuity"
+   appendix="TrafficAnalytics"
+   def name = "${baseName}-${appendix}-${version}"
+   into name
+   description='Log analytics application'
+   into("examples") {
+     from "${buildDir}/../../examples/${appendix}"
+   }
+}
+
+// Couldn't find a good way to create the zip files for the three examples
+// without having to create three tasks
+task examples_page_analytics (type: Zip) {
+   group='Continuuity'
+   baseName = "continuuity"
+   appendix="PageViewAnalytics"
+   def name = "${baseName}-${appendix}-${version}"
+   into name
+   description='Log analytics application'
+   into("examples") {
+     from "${buildDir}/../../examples/${appendix}"
+   }
+}
+
+task docs_dist_pdf (type: Zip) {
+   doFirst {
+     runSphinxPDF("${buildDir}/../../docs/developer-guide")
+   }
+   group = 'Continuuity'
+   baseName = "continuuity"
+   appendix = "pdf-docs"
+   def name = "${baseName}-${appendix}-${version}"
+   into name
+   description = 'Distribution to package PDF documents'
+   into("pdf") {
+    from "${buildDir}/../../docs/developer-guide/build-pdf"
+   } 
+}
+
+task docs_dist (type: Zip, dependsOn: ['examples_response_analytics', 'examples_traffic_analytics', 'examples_page_analytics']) {
+   doFirst {
+     runSphinx("${buildDir}/../../docs/developer-guide")
+   }
+   group = 'Continuuity'
+   baseName = "continuuity"
+   appendix = "docs"
+   def name = "${baseName}-${appendix}-${version}"
+   into name
+   description = 'Distribution to package documents'
+   into("javadocs"){
+     from project(':distributions').tasks.getByName('javadoc').outputs
+   }
+   into("html") {
+    from "${buildDir}/../../docs/developer-guide/build"
+   } 
+ }
 
 // common continuuity package
 task prepackager(overwrite: true) {
@@ -350,7 +461,6 @@ task prepackager(overwrite: true) {
     }
   }
 }
-
 
 // Override some of our base packaging.gradle parameters for common package
 packaging {

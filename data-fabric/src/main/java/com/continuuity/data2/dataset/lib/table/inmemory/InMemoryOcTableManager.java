@@ -7,7 +7,8 @@ import java.util.Properties;
 /**
  *
  */
-public class InMemoryOcTableManager implements DataSetManager {
+public class
+  InMemoryOcTableManager implements DataSetManager {
   @Override
   public boolean exists(String name) {
     return InMemoryOcTableService.exists(name);
@@ -31,5 +32,10 @@ public class InMemoryOcTableManager implements DataSetManager {
   @Override
   public void drop(String name) {
     InMemoryOcTableService.drop(name);
+  }
+
+  @Override
+  public void upgrade(String name, Properties properties) throws Exception {
+    // No-op
   }
 }

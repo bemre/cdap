@@ -6,6 +6,11 @@ define(['core/components', 'core/embeddables/index', 'core/http',
 				'core/util'],
 function(Components, Embeddables, HTTP, Util) {
 
+  /**
+   * Interval where services are called to check.
+   */
+  var SERVICES_INTERVAL = 3000;
+
 	var Application = Ember.Application.extend({
 
 		/*
@@ -47,7 +52,7 @@ function(Components, Embeddables, HTTP, Util) {
 		/*
 		 * Enable or disable local cache.
 		 */
-		ENABLE_CACHE: typeof Storage !== "undefined",
+		ENABLE_CACHE: false,
 
 		/*
 		 * Allows us to set the ID of the main view element.
@@ -71,20 +76,54 @@ function(Components, Embeddables, HTTP, Util) {
 				/*
 				 * Do version check.
 				 */
-				this.HTTP.get('version', {cache: true}, this.checkVersion);
+				this.HTTP.get('version', this.checkVersion);
 			},
 
 			checkVersion: function(version) {
 
-				if (version && version.current !== 'UNKNOWN') {
+				if (version && version.current !== 'UNKNOWN' &&
+					version.current.indexOf('SNAPSHOT') === -1) {
 
-					if (version.current !== version.newest &&
-						version.current.indexOf('SNAPSHOT') === -1 &&
-						C.get('isLocal')) {
+					var display = false;
+					var current = version.current.split(/\./);
+					var newest = version.newest.split(/\./);
 
-						$('#warning').html('<div>New version available: ' + version.current + ' » ' +
-							version.newest + '<br /><a target="_blank" href="https://accounts.continuuity.com/">' +
-							'Click here to download</a>.</div>').show();
+					current = {
+						major: +current[0],
+						minor: +current[1],
+						revision: +current[2]
+					};
+
+					newest = {
+						major: +newest[0],
+						minor: +newest[1],
+						revision: +newest[2]
+					};
+
+					if (newest.major === current.major) {
+						if (newest.minor === current.minor) {
+							if (newest.revision > current.revision) {
+								display = true;
+							}
+						} else {
+							if (newest.minor > current.minor) {
+								display = true;
+							}
+						}
+
+					} else {
+						if (newest.major > current.major) {
+							display = true;
+						}
+					}
+
+					if (display && C.get('isLocal')) {
+						$('#warning .warning-text').html('New version available: ' + newest.major +
+							'.' + newest.minor + '.' + newest.revision +
+							'<br /><a target="_blank" href="https://www.continuuity.com/download">' +
+							'Click here to download</a>.');
+						$('#warning').show();
+
 					}
 				}
 			}
@@ -104,11 +143,56 @@ function(Components, Embeddables, HTTP, Util) {
 
 		initialize: function (http) {
 			var self = this;
-			http.get('environment', {cache: true}, function (response) {
+			http.get('environment', function (response) {
 				 self.setupEnvironment(response);
 			});
 
 		},
+
+		/**
+		 * Sets up authentication on the global Ember application.
+		 */
+		setupAuth: function (routeHandler, callback) {
+			/**
+			 * Recieves response of type {token: <token>}
+			 */
+			HTTP.create().get('getsession', function (resp) {
+				if ('token' in resp) {
+					C.Env.set('auth_token', resp.token);
+				} else {
+					C.Env.set('auth_token', '');
+				}
+				if (routeHandler !== undefined && !C.Env.get('auth_token') && 'routeName' in routeHandler) {
+					routeHandler.transitionTo('Login');
+				} else if (typeof callback === 'function') {
+				  callback();
+				}
+			});
+		},
+
+//    /**
+//     * Determines readiness of Reactor by polling all services and checking status.
+//     * @param routeHandler Object Ember route handler.
+//     * @param callback Function to execute.
+//     */
+//    checkReactorReadiness: function (routeHandler, callback) {
+//      HTTP.create().rest('system/services/status', function (statuses, callStatus) {
+//      	if (callStatus !== 200) {
+//      		routeHandler.transitionTo('Loading');
+//      		return;
+//      	}
+//        if (routeHandler !== undefined && 'routeName' in routeHandler) {
+//          if (C.Util.isLoadingComplete(statuses)) {
+//            routeHandler.transitionTo(routeHandler.routeName);
+//          } else {
+//            routeHandler.transitionTo('Loading');
+//          }
+//        }
+//        if (callback && typeof callback === 'function') {
+//          callback();
+//        }
+//      });
+//    },
 
 		setupEnvironment: function (env) {
 
@@ -116,6 +200,8 @@ function(Components, Embeddables, HTTP, Util) {
 			C.Env.set('productId', env.product_id);
 			C.Env.set('productName', env.product_name);
 			C.Env.set('ip', env.ip);
+			C.Env.set('nux', !!env.nux);
+      C.Env.set('security_enabled', env.security_enabled);
 
 			$('title').text(env.product_name + ' » Continuuity');
 
@@ -173,6 +259,15 @@ function(Components, Embeddables, HTTP, Util) {
 					}, C.EMBEDDABLE_DELAY);
 				}
 
+				if (C.get('isLocal') && C.Env.get('nux')) {
+					C.Util.NUX.start();
+				}
+
+				// Scans support links to popup the feedback widget.
+				if (window.UserVoice !== undefined) {
+					UserVoice.scan();
+				}
+
 			});
 
 		},
@@ -181,7 +276,7 @@ function(Components, Embeddables, HTTP, Util) {
 			var themeLink = document.createElement('link');
 			themeLink.setAttribute("rel", "stylesheet");
 			themeLink.setAttribute("type", "text/css");
-			themeLink.setAttribute("href", "/assets/css/" + C.Env.get('productId') + ".css");
+			themeLink.setAttribute("href", "/assets/css/new/" + C.Env.get('productId') + ".css");
 			return themeLink;
 		},
 
@@ -198,6 +293,13 @@ function(Components, Embeddables, HTTP, Util) {
 		},
 		__timeRange: 60,
 		__timeLabel: 'Last 1 Minute',
+		routeHandlers: {},
+		addRouteHandler: function (id, handler) {
+			this.routeHandlers[id] = handler;
+		},
+		removeRouteHandler: function (id) {
+			delete this.routeHandlers[id];
+		},
 		resizeHandlers: {},
 		addResizeHandler: function (id, handler) {
 			this.resizeHandlers[id] = handler;
@@ -293,10 +395,47 @@ function(Components, Embeddables, HTTP, Util) {
 			 * See "advanceReadiness" in the "setupEnvironment" call above.
 			 */
 			C.deferReadiness();
-			C.initialize(HTTP.create());
+			var http = HTTP.create();
+			C.initialize(http);
+			if (C.Env.security_enabled) {
+			  C.setupAuth();
+			}
+
+      /**
+       * Call services on a per second interval and update icon if any fail.
+       */
+      //Call initially first so there is no wait, then call every 3 seconds.
+      Em.run(function() {
+        callServiceStatus()
+        setInterval(function () {
+          callServiceStatus();
+        }, SERVICES_INTERVAL);
+      });
 
 		}
 	});
+
+  /**
+   * Calls the service status endpoint and sets the notification status that displays number of failed services.
+   */
+  var callServiceStatus = function () {
+    HTTP.create().rest('system/services/status', function (statuses, callStatus) {
+      var failedStatusCount = 0;
+      if (Object.prototype.toString.call(statuses) == '[object Object]') {
+	      for (var status in statuses) {
+	        if (statuses.hasOwnProperty(status) && statuses[status] !== 'OK') {
+	          failedStatusCount++;
+	        }
+	      }
+	      if (failedStatusCount) {
+	        $("#failed-services").html(failedStatusCount);
+	        $("#failed-services-container").show();
+	      } else {
+	        $("#failed-services-container").hide();
+	      }      	
+      }
+    });
+};
 
 	/*
 	 * Handle window resize events (e.g. for Sparkline resize)
@@ -318,15 +457,21 @@ function(Components, Embeddables, HTTP, Util) {
 	};
 
 	window.onblur = function () {
-		if (C && typeof C.blur === 'function') {
+		if (C !== undefined && typeof C.blur === 'function') {
 			C.blur();
 		}
 	};
 	window.onfocus = function () {
-		if (C && typeof C.focus === 'function') {
+		if (C !== undefined && typeof C.focus === 'function') {
 			C.focus();
 		}
 	};
+
+	Em.run.next(function() {			
+		$('#warning-close').click(function() {
+			$('#warning').hide();
+		});
+	});
 
 	Em.debug('Application setup complete');
 

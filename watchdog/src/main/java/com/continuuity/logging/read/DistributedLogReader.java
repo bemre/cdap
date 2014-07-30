@@ -4,7 +4,6 @@
 
 package com.continuuity.logging.read;
 
-import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.logging.LoggingContext;
 import com.continuuity.data.DataSetAccessor;
@@ -18,17 +17,19 @@ import com.continuuity.logging.filter.AndFilter;
 import com.continuuity.logging.filter.Filter;
 import com.continuuity.logging.kafka.KafkaConsumer;
 import com.continuuity.logging.save.LogSaver;
+import com.continuuity.logging.save.LogSaverTableUtil;
 import com.continuuity.logging.serialize.LogSchema;
 import com.continuuity.logging.write.FileMetaDataManager;
-import com.continuuity.weave.common.Threads;
-import com.continuuity.weave.filesystem.Location;
-import com.continuuity.weave.filesystem.LocationFactory;
+import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.inject.Inject;
 import org.apache.avro.Schema;
+import org.apache.twill.common.Threads;
+import org.apache.twill.filesystem.Location;
+import org.apache.twill.filesystem.LocationFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -87,7 +88,7 @@ public final class DistributedLogReader implements LogReader {
       this.serializer = new LoggingEventSerializer();
 
       this.fileMetaDataManager =
-        new FileMetaDataManager(LogSaver.getMetaTable(dataSetAccessor), txClient, locationFactory);
+        new FileMetaDataManager(new LogSaverTableUtil(dataSetAccessor).getMetaTable(), txClient, locationFactory);
 
       this.schema = new LogSchema().getAvroSchema();
     } catch (Exception e) {

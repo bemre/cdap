@@ -6,23 +6,23 @@ import com.continuuity.app.runtime.ProgramController;
 import com.continuuity.app.runtime.ProgramOptions;
 import com.continuuity.app.runtime.ProgramRunner;
 import com.continuuity.common.conf.Constants;
-import com.continuuity.common.http.core.NettyHttpService;
 import com.continuuity.common.utils.Networks;
-import com.continuuity.weave.api.RunId;
-import com.continuuity.weave.api.ServiceAnnouncer;
-import com.continuuity.weave.common.Cancellable;
-import com.continuuity.weave.discovery.Discoverable;
-import com.continuuity.weave.discovery.DiscoveryService;
-import com.continuuity.weave.internal.RunIds;
+import com.continuuity.http.NettyHttpService;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
 import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.inject.Inject;
 import com.google.inject.name.Named;
+import org.apache.twill.api.RunId;
+import org.apache.twill.api.ServiceAnnouncer;
+import org.apache.twill.common.Cancellable;
+import org.apache.twill.discovery.Discoverable;
+import org.apache.twill.discovery.DiscoveryService;
+import org.apache.twill.internal.RunIds;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,16 +43,16 @@ public class WebappProgramRunner implements ProgramRunner {
   private final ServiceAnnouncer serviceAnnouncer;
   private final DiscoveryService discoveryService;
   private final InetAddress hostname;
-  private final WebappHttpHandlerFactory handlerFactory;
+  private final WebappHttpHandlerFactory webappHttpHandlerFactory;
 
   @Inject
   public WebappProgramRunner(ServiceAnnouncer serviceAnnouncer, DiscoveryService discoveryService,
                              @Named(Constants.AppFabric.SERVER_ADDRESS) InetAddress hostname,
-                             WebappHttpHandlerFactory handlerFactory) {
+                             WebappHttpHandlerFactory webappHttpHandlerFactory) {
     this.serviceAnnouncer = serviceAnnouncer;
     this.discoveryService = discoveryService;
     this.hostname = hostname;
-    this.handlerFactory = handlerFactory;
+    this.webappHttpHandlerFactory = webappHttpHandlerFactory;
   }
 
   @Override
@@ -72,8 +72,10 @@ public class WebappProgramRunner implements ProgramRunner {
 
       // Start netty server
       // TODO: add metrics reporting
+      JarHttpHandler jarHttpHandler = webappHttpHandlerFactory.createHandler(program.getJarLocation());
       NettyHttpService.Builder builder = NettyHttpService.builder();
-      builder.addHttpHandlers(ImmutableList.of(handlerFactory.createHandler(program.getJarLocation())));
+      builder.addHttpHandlers(ImmutableSet.of(jarHttpHandler));
+      builder.setUrlRewriter(new WebappURLRewriter(jarHttpHandler));
       builder.setHost(hostname.getCanonicalHostName());
       NettyHttpService httpService = builder.build();
       httpService.startAndWait();

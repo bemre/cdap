@@ -1,8 +1,8 @@
-/**
- * Copyright 2012-2013 Continuuity,Inc. All Rights Reserved.
+/*
+ * Copyright 2014 Continuuity,Inc. All Rights Reserved.
  */
 
 /**
- * Zookeeper classes.
+ * This package contains classes for interact with ZooKeeper.
  */
 package com.continuuity.common.zookeeper;

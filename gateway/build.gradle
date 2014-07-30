@@ -3,19 +3,14 @@ apply plugin: 'java'
 apply plugin: 'application'
 apply from: "$rootProject.projectDir/gradle/packaging.gradle"
 
-tasks.withType(Compile) { 
-    options.compilerArgs << "-Xlint:unchecked"
-} 
-
 dependencies {
-  compile elastic([group: 'com.continuuity', name: 'passport', version: "${version}", changing: true], "passport")
   compile elastic([group: 'com.continuuity', name: 'data-fabric', version: "${version}", changing: true], "data-fabric")
   compile elastic([group: 'com.continuuity', name: 'data-fabric', classifier: 'api', version: "${version}", changing: true], "data-fabric")
+  compile elastic([group: 'com.continuuity', name: 'security', version: "${version}", changing: true], "security")
   testCompile elastic([group: 'com.continuuity', name: 'data-fabric', classifier: 'test', version: "${version}", changing: true], "data-fabric")
 
   compile elastic([group: 'com.continuuity', name: 'app-fabric', classifier: 'api', version: "${version}", changing: true], "app-fabric")
   compile elastic([group: 'com.continuuity', name: 'app-fabric', version: "${version}", changing: true], "app-fabric")
-  compile elastic([group: 'com.continuuity', name: 'app-fabric', classifier: 'thrift', version: "${version}", changing: true], "app-fabric")
 
   clover elastic([group: 'com.continuuity', name: 'app-fabric', classifier: 'api', version: "${version}", changing: true], "app-fabric")
   clover elastic([group: 'com.continuuity', name: 'data-fabric', classifier: 'api', version: "${version}", changing: true], "data-fabric")
@@ -33,7 +28,8 @@ dependencies {
   compile libraries.flume_ng_core
   compile libraries.flume_ng_sdk
 
-  compile libraries.weave_discovery_api
+  compile libraries.twill_discovery_api
+  compile libraries.continuuity_netty_http
 }
 
 test {
@@ -51,13 +47,17 @@ jar.exclude '*.xml'
 configurations {
     all*.exclude group: 'org.jboss.netty', module: 'netty'
     all*.exclude group: 'asm', module: 'asm'
+    all {
+        // Need to enforce our version of guava, otherwise some other components with newer versions may take over
+        resolutionStrategy.force libraries.google_guava
+    }
 }
 
 /**
  * Excludes Tests that are part of test suite.
  */
 test {
-  exclude '**/v2/handlers/v2/**'
-  exclude '**/v2/tools/**'
+  exclude '**/handlers/**'
+  exclude '**/tools/**'
   exclude '**/collector/**'
 }

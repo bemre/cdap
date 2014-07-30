@@ -4,8 +4,8 @@
 package com.continuuity.data2.transaction.queue;
 
 import com.continuuity.common.queue.QueueName;
-import com.continuuity.data2.queue.QueueEntry;
 import com.continuuity.data2.queue.Queue2Producer;
+import com.continuuity.data2.queue.QueueEntry;
 import com.continuuity.data2.transaction.Transaction;
 import com.continuuity.data2.transaction.TransactionAware;
 import com.google.common.base.Preconditions;
@@ -49,7 +49,7 @@ public abstract class AbstractQueue2Producer implements Queue2Producer, Transact
   }
 
   @Override
-  public void enqueue(Iterable <QueueEntry> entries) throws IOException {
+  public void enqueue(Iterable<QueueEntry> entries) throws IOException {
     Preconditions.checkState(transaction != null, "Enqueue called outside of transaction.");
     Iterables.addAll(queue, entries);
   }

@@ -5,18 +5,21 @@
 package com.continuuity.internal.app.program;
 
 import com.continuuity.AllProgramsApp;
+import com.continuuity.AppWithNoServices;
+import com.continuuity.AppWithServices;
 import com.continuuity.FlowMapReduceApp;
 import com.continuuity.NoProgramsApp;
 import com.continuuity.ToyApp;
 import com.continuuity.WordCountApp;
-import com.continuuity.api.ApplicationSpecification;
 import com.continuuity.api.ProgramSpecification;
 import com.continuuity.api.annotation.Handle;
 import com.continuuity.api.annotation.Output;
 import com.continuuity.api.annotation.ProcessInput;
 import com.continuuity.api.annotation.UseDataSet;
+import com.continuuity.api.app.AbstractApplication;
+import com.continuuity.api.app.Application;
+import com.continuuity.api.app.ApplicationContext;
 import com.continuuity.api.common.Bytes;
-import com.continuuity.data2.OperationException;
 import com.continuuity.api.data.dataset.IndexedTable;
 import com.continuuity.api.data.dataset.KeyValueTable;
 import com.continuuity.api.data.dataset.table.Table;
@@ -26,19 +29,25 @@ import com.continuuity.api.flow.flowlet.OutputEmitter;
 import com.continuuity.api.mapreduce.AbstractMapReduce;
 import com.continuuity.api.mapreduce.MapReduceSpecification;
 import com.continuuity.api.procedure.AbstractProcedure;
+import com.continuuity.api.service.ServiceSpecification;
+import com.continuuity.app.ApplicationSpecification;
+import com.continuuity.app.DefaultAppConfigurer;
 import com.continuuity.app.Id;
 import com.continuuity.app.program.Program;
 import com.continuuity.app.program.RunRecord;
 import com.continuuity.app.program.Type;
 import com.continuuity.data.operation.OperationContext;
+import com.continuuity.data2.OperationException;
+import com.continuuity.internal.app.Specifications;
 import com.continuuity.internal.app.store.MDTBasedStore;
 import com.continuuity.metadata.MetaDataTable;
+import com.continuuity.test.internal.AppFabricTestHelper;
 import com.continuuity.test.internal.DefaultId;
-import com.continuuity.test.internal.TestHelper;
-import com.continuuity.weave.filesystem.LocalLocationFactory;
 import com.google.common.base.Charsets;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Sets;
+import org.apache.twill.api.RuntimeSpecification;
+import org.apache.twill.filesystem.LocalLocationFactory;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
@@ -56,10 +65,10 @@ public class MDTBasedStoreTest {
   // we do it in @Before (not in @BeforeClass) to have easy automatic cleanup between tests
   @Before
   public void before() throws OperationException {
-    store = TestHelper.getInjector().getInstance(MDTBasedStore.class);
+    store = AppFabricTestHelper.getInjector().getInstance(MDTBasedStore.class);
 
     // clean up data
-    MetaDataTable mds = TestHelper.getInjector().getInstance(MetaDataTable.class);
+    MetaDataTable mds = AppFabricTestHelper.getInjector().getInstance(MetaDataTable.class);
     for (String account : mds.listAccounts(new OperationContext(DefaultId.DEFAULT_ACCOUNT_ID))) {
       mds.clear(new OperationContext(account), account, null);
     }
@@ -67,7 +76,7 @@ public class MDTBasedStoreTest {
 
   @Test
   public void testLoadingProgram() throws Exception {
-    TestHelper.deployApplication(ToyApp.class);
+    AppFabricTestHelper.deployApplication(ToyApp.class);
     Program program = store.loadProgram(Id.Program.from(DefaultId.ACCOUNT.getId(), "ToyApp", "ToyFlow"), Type.FLOW);
     Assert.assertNotNull(program);
   }
@@ -139,15 +148,21 @@ public class MDTBasedStoreTest {
     // testing "get all history for account"
     // note: we need to add account's apps info into store
     store.addApplication(Id.Application.from("account1", "application1"),
-                         ApplicationSpecification.Builder.with().setName("application1").setDescription("")
-                         .noStream().noDataSet()
-                         .withFlows().add(new FlowImpl("flow1")).add(new FlowImpl("flow2"))
-                         .noProcedure().noMapReduce().noWorkflow().build(), new LocalLocationFactory().create("/foo"));
+                         getSpec(
+                           com.continuuity.api.ApplicationSpecification.Builder.with()
+                             .setName("application1").setDescription("")
+                             .noStream().noDataSet()
+                             .withFlows().add(new FlowImpl("flow1")).add(new FlowImpl("flow2"))
+                             .noProcedure().noMapReduce().noWorkflow().build()),
+                         new LocalLocationFactory().create("/foo"));
     store.addApplication(Id.Application.from("account2", "application1"),
-                         ApplicationSpecification.Builder.with().setName("application1").setDescription("")
-                         .noStream().noDataSet()
-                         .withFlows().add(new FlowImpl("flow1")).add(new FlowImpl("flow2"))
-                         .noProcedure().noMapReduce().noWorkflow().build(), new LocalLocationFactory().create("/foo"));
+                         getSpec(
+                           com.continuuity.api.ApplicationSpecification.Builder.with()
+                             .setName("application1").setDescription("")
+                             .noStream().noDataSet()
+                             .withFlows().add(new FlowImpl("flow1")).add(new FlowImpl("flow2"))
+                             .noProcedure().noMapReduce().noWorkflow().build()),
+                         new LocalLocationFactory().create("/foo"));
 
     com.google.common.collect.Table<Type, Id.Program, List<RunRecord>> runHistory =
                                                            store.getAllRunHistory(new Id.Account("account1"));
@@ -164,7 +179,7 @@ public class MDTBasedStoreTest {
 
   @Test
   public void testAddApplication() throws Exception {
-    ApplicationSpecification spec = new WordCountApp().configure();
+    ApplicationSpecification spec = getSpec(new WordCountApp().configure());
     Id.Application id = new Id.Application(new Id.Account("account1"), "application1");
     store.addApplication(id, spec, new LocalLocationFactory().create("/foo/path/application1.jar"));
 
@@ -176,7 +191,7 @@ public class MDTBasedStoreTest {
 
   @Test
   public void testUpdateSameApplication() throws Exception {
-    ApplicationSpecification spec = new WordCountApp().configure();
+    ApplicationSpecification spec = getSpec(new WordCountApp().configure());
     Id.Application id = new Id.Application(new Id.Account("account1"), "application1");
     store.addApplication(id, spec, new LocalLocationFactory().create("/foo/path/application1.jar"));
     // update
@@ -192,18 +207,22 @@ public class MDTBasedStoreTest {
   public void testUpdateChangedApplication() throws Exception {
     Id.Application id = new Id.Application(new Id.Account("account1"), "application1");
 
-    store.addApplication(id, new FooApp().configure(), new LocalLocationFactory().create("/foo"));
+    store.addApplication(id, getSpec(new FooApp().configure()), new LocalLocationFactory().create("/foo"));
     // update
-    store.addApplication(id, new ChangedFooApp().configure(), new LocalLocationFactory().create("/foo"));
+    store.addApplication(id, getSpec(new ChangedFooApp().configure()), new LocalLocationFactory().create("/foo"));
 
     ApplicationSpecification stored = store.getApplication(id);
     assertChangedFooAppSpecAndInMetadataStore(stored);
   }
 
+  private ApplicationSpecification getSpec(com.continuuity.api.ApplicationSpecification spec) {
+    return Specifications.from(spec);
+  }
+
   private static class FooApp implements com.continuuity.api.Application {
     @Override
-    public ApplicationSpecification configure() {
-      return ApplicationSpecification.Builder.with()
+    public com.continuuity.api.ApplicationSpecification configure() {
+      return com.continuuity.api.ApplicationSpecification.Builder.with()
         .setName("FooApp")
         .setDescription("Foo App")
         .withStreams()
@@ -228,8 +247,8 @@ public class MDTBasedStoreTest {
 
   private static class ChangedFooApp implements com.continuuity.api.Application {
     @Override
-    public ApplicationSpecification configure() {
-      return ApplicationSpecification.Builder.with()
+    public com.continuuity.api.ApplicationSpecification configure() {
+      return com.continuuity.api.ApplicationSpecification.Builder.with()
         .setName("FooApp")
         .setDescription("Foo App")
         .withStreams()
@@ -327,27 +346,79 @@ public class MDTBasedStoreTest {
   }
 
 
-  private void assertWordCountAppSpecAndInMetadataStore(ApplicationSpecification stored)
-    throws org.apache.thrift.TException {
+  private void assertWordCountAppSpecAndInMetadataStore(ApplicationSpecification stored) {
     // should be enough to make sure it is stored
     Assert.assertEquals(1, stored.getDataSets().size());
     Assert.assertEquals(WordCountApp.WordCountFlow.class.getName(),
                         stored.getFlows().get("WordCountFlow").getClassName());
   }
 
-  private void assertChangedFooAppSpecAndInMetadataStore(ApplicationSpecification stored)
-    throws org.apache.thrift.TException {
+  private void assertChangedFooAppSpecAndInMetadataStore(ApplicationSpecification stored) {
     // should be enough to make sure it is stored
     Assert.assertEquals(2, stored.getDataSets().size());
     Assert.assertEquals(FlowImpl.class.getName(),
                         stored.getFlows().get("flow2").getClassName());
   }
 
+
+  @Test
+  public void testServiceDeletion() throws Exception {
+    // Store the application specification
+    AbstractApplication app = new AppWithServices();
+
+    ApplicationSpecification appSpec = getAppSpec(app);
+    Id.Application appId = new Id.Application(new Id.Account(DefaultId.ACCOUNT.getId()), appSpec.getName());
+    store.addApplication(appId, appSpec, new LocalLocationFactory().create("/appwithservicestestdelete"));
+
+    AbstractApplication newApp = new AppWithNoServices();
+
+    // get the delete program specs after deploying AppWithNoServices
+    List<ProgramSpecification> programSpecs = store.getDeletedProgramSpecifications(appId, getAppSpec(newApp));
+
+    //verify the result.
+    Assert.assertEquals(1, programSpecs.size());
+    Assert.assertEquals("NoOpService", programSpecs.get(0).getName());
+  }
+
+  private ApplicationSpecification getAppSpec(Application application) {
+    DefaultAppConfigurer appConfigurer = new DefaultAppConfigurer(application);
+    application.configure(appConfigurer, new ApplicationContext());
+    return appConfigurer.createApplicationSpec();
+  }
+
+  @Test
+  public void testServiceRunnableInstances() throws Exception {
+    AppFabricTestHelper.deployApplication(AppWithServices.class);
+    AbstractApplication app = new AppWithServices();
+    DefaultAppConfigurer appConfigurer = new DefaultAppConfigurer(app);
+    app.configure(appConfigurer, new ApplicationContext());
+
+    ApplicationSpecification appSpec = appConfigurer.createApplicationSpec();
+    Id.Application appId = new Id.Application(new Id.Account(DefaultId.ACCOUNT.getId()), appSpec.getName());
+    store.addApplication(appId, appSpec, new LocalLocationFactory().create("/appwithservices"));
+
+    Id.Program programId = Id.Program.from(appId, "NoOpService");
+    int count = store.getServiceRunnableInstances(programId, "DummyService");
+    Assert.assertEquals(1, count);
+
+    store.setServiceRunnableInstances(programId, "DummyService", 10);
+    count = store.getServiceRunnableInstances(programId, "DummyService");
+    Assert.assertEquals(10, count);
+
+    ApplicationSpecification newSpec = store.getApplication(appId);
+    Map<String, ServiceSpecification> services = newSpec.getServices();
+    Assert.assertEquals(1, services.size());
+
+    Map<String, RuntimeSpecification> runtimeSpecs = services.get("NoOpService").getRunnables();
+    Assert.assertEquals(1, runtimeSpecs.size());
+    Assert.assertEquals(10, runtimeSpecs.get("DummyService").getResourceSpecification().getInstances());
+  }
+
   @Test
   public void testSetFlowletInstances() throws Exception {
-    TestHelper.deployApplication(WordCountApp.class);
+    AppFabricTestHelper.deployApplication(WordCountApp.class);
 
-    ApplicationSpecification spec = new WordCountApp().configure();
+    ApplicationSpecification spec = getSpec(new WordCountApp().configure());
     int initialInstances = spec.getFlows().get("WordCountFlow").getFlowlets().get("StreamSource").getInstances();
     Id.Application appId = new Id.Application(new Id.Account(DefaultId.ACCOUNT.getId()), spec.getName());
     store.addApplication(appId, spec, new LocalLocationFactory().create("/foo"));
@@ -370,8 +441,8 @@ public class MDTBasedStoreTest {
   @Test
   public void testProcedureInstances() throws Exception {
 
-    TestHelper.deployApplication(AllProgramsApp.class);
-    ApplicationSpecification spec = new AllProgramsApp().configure();
+    AppFabricTestHelper.deployApplication(AllProgramsApp.class);
+    ApplicationSpecification spec = getSpec(new AllProgramsApp().configure());
 
     Id.Application appId = new Id.Application(new Id.Account(DefaultId.ACCOUNT.getId()), spec.getName());
     Id.Program programId = new Id.Program(appId, "NoOpProcedure");
@@ -388,7 +459,7 @@ public class MDTBasedStoreTest {
 
   @Test
   public void testRemoveAllApplications() throws Exception {
-    ApplicationSpecification spec = new WordCountApp().configure();
+    ApplicationSpecification spec = getSpec(new WordCountApp().configure());
     Id.Account accountId = new Id.Account("account1");
     Id.Application appId = new Id.Application(accountId, spec.getName());
     store.addApplication(appId, spec, new LocalLocationFactory().create("/foo"));
@@ -408,7 +479,7 @@ public class MDTBasedStoreTest {
 
   @Test
   public void testRemoveAll() throws Exception {
-    ApplicationSpecification spec = new WordCountApp().configure();
+    ApplicationSpecification spec = getSpec(new WordCountApp().configure());
     Id.Account accountId = new Id.Account("account1");
     Id.Application appId = new Id.Application(accountId, "application1");
     store.addApplication(appId, spec, new LocalLocationFactory().create("/foo"));
@@ -428,7 +499,7 @@ public class MDTBasedStoreTest {
 
   @Test
   public void testRemoveApplication() throws Exception {
-    ApplicationSpecification spec = new WordCountApp().configure();
+    ApplicationSpecification spec = getSpec(new WordCountApp().configure());
     Id.Account accountId = new Id.Account("account1");
     Id.Application appId = new Id.Application(accountId, spec.getName());
     store.addApplication(appId, spec, new LocalLocationFactory().create("/foo"));
@@ -448,7 +519,7 @@ public class MDTBasedStoreTest {
 
   @Test
   public void testRuntimeArgsDeletion() throws Exception {
-    ApplicationSpecification spec = new AllProgramsApp().configure();
+    ApplicationSpecification spec = getSpec(new AllProgramsApp().configure());
     Id.Account accountId = new Id.Account("testDeleteRuntimeArgs");
     Id.Application appId = new Id.Application(accountId, spec.getName());
     store.addApplication(appId, spec, new LocalLocationFactory().create("/foo"));
@@ -499,11 +570,12 @@ public class MDTBasedStoreTest {
     Assert.assertEquals(0, args.size());
   }
 
+
   @Test
   public void testCheckDeletedProgramSpecs () throws Exception {
     //Deploy program with all types of programs.
-    TestHelper.deployApplication(AllProgramsApp.class);
-    ApplicationSpecification spec = new AllProgramsApp().configure();
+    AppFabricTestHelper.deployApplication(AllProgramsApp.class);
+    ApplicationSpecification spec = getSpec(new AllProgramsApp().configure());
 
     Set<String> specsToBeVerified = Sets.newHashSet();
     specsToBeVerified.addAll(spec.getProcedures().keySet());
@@ -520,7 +592,7 @@ public class MDTBasedStoreTest {
     Assert.assertEquals(0, deletedSpecs.size());
 
     //Get the spec for app that contains no programs.
-    spec = new NoProgramsApp().configure();
+    spec = getSpec(new NoProgramsApp().configure());
 
     //Get the deleted program specs by sending a spec with same name as AllProgramsApp but with no programs
     deletedSpecs = store.getDeletedProgramSpecifications(appId, spec);
@@ -538,8 +610,8 @@ public class MDTBasedStoreTest {
   @Test
   public void testCheckDeletedProceduresAndWorkflow () throws Exception {
     //Deploy program with all types of programs.
-    TestHelper.deployApplication(AllProgramsApp.class);
-    ApplicationSpecification spec = new AllProgramsApp().configure();
+    AppFabricTestHelper.deployApplication(AllProgramsApp.class);
+    ApplicationSpecification spec = getSpec(new AllProgramsApp().configure());
 
     Set<String> specsToBeDeleted = Sets.newHashSet();
     specsToBeDeleted.addAll(spec.getWorkflows().keySet());
@@ -550,7 +622,7 @@ public class MDTBasedStoreTest {
     Id.Application appId = Id.Application.from(DefaultId.ACCOUNT, "App");
 
     //Get the spec for app that contains only flow and mapreduce - removing procedures and workflows.
-    spec = new FlowMapReduceApp().configure();
+    spec = getSpec(new FlowMapReduceApp().configure());
 
     //Get the deleted program specs by sending a spec with same name as AllProgramsApp but with no programs
     List<ProgramSpecification> deletedSpecs = store.getDeletedProgramSpecifications(appId, spec);

@@ -6,6 +6,10 @@ package com.continuuity.internal.app.runtime.flow;
 import com.continuuity.internal.app.runtime.AbstractProgramController;
 import com.continuuity.internal.app.runtime.ProgramOptionConstants;
 import com.google.common.base.Preconditions;
+import com.google.common.io.Closeables;
+import com.google.common.util.concurrent.Service;
+import org.apache.twill.common.ServiceListenerAdapter;
+import org.apache.twill.common.Threads;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,16 +24,19 @@ final class FlowletProgramController extends AbstractProgramController {
 
   private final BasicFlowletContext flowletContext;
   private final FlowletProcessDriver driver;
-  private final Collection<QueueConsumerSupplier> queueConsumerSuppliers;
+  private final Collection<ConsumerSupplier<?>> consumerSuppliers;
 
+  /**
+   * Constructs an instance. The instance must be constructed before the flowlet driver starts.
+   */
   FlowletProgramController(String programName, String flowletName,
                            BasicFlowletContext flowletContext, FlowletProcessDriver driver,
-                           Collection<QueueConsumerSupplier> queueConsumerSuppliers) {
+                           Collection<ConsumerSupplier<?>> consumerSuppliers) {
     super(programName + ":" + flowletName, flowletContext.getRunId());
     this.flowletContext = flowletContext;
     this.driver = driver;
-    this.queueConsumerSuppliers = queueConsumerSuppliers;
-    started();
+    this.consumerSuppliers = consumerSuppliers;
+    listenDriveState(driver);
   }
 
   @Override
@@ -37,8 +44,8 @@ final class FlowletProgramController extends AbstractProgramController {
     LOG.info("Suspending flowlet: " + flowletContext);
     driver.suspend();
     // Close all consumers
-    for (QueueConsumerSupplier queueConsumerSupplier : queueConsumerSuppliers) {
-      queueConsumerSupplier.close();
+    for (ConsumerSupplier consumerSupplier : consumerSuppliers) {
+      consumerSupplier.close();
     }
     LOG.info("Flowlet suspended: " + flowletContext);
   }
@@ -47,8 +54,8 @@ final class FlowletProgramController extends AbstractProgramController {
   protected void doResume() throws Exception {
     LOG.info("Resuming flowlet: " + flowletContext);
     // Open consumers
-    for (QueueConsumerSupplier queueConsumerSupplier : queueConsumerSuppliers) {
-      queueConsumerSupplier.open(flowletContext.getInstanceCount());
+    for (ConsumerSupplier consumerSupplier : consumerSuppliers) {
+      consumerSupplier.open(flowletContext.getInstanceCount());
     }
     driver.resume();
     LOG.info("Flowlet resumed: " + flowletContext);
@@ -59,8 +66,8 @@ final class FlowletProgramController extends AbstractProgramController {
     LOG.info("Stopping flowlet: " + flowletContext);
     driver.stopAndWait();
     // Close all consumers
-    for (QueueConsumerSupplier queueConsumerSupplier : queueConsumerSuppliers) {
-      queueConsumerSupplier.close();
+    for (ConsumerSupplier consumerSupplier : consumerSuppliers) {
+      Closeables.closeQuietly(consumerSupplier);
     }
     LOG.info("Flowlet stopped: " + flowletContext);
   }
@@ -82,5 +89,31 @@ final class FlowletProgramController extends AbstractProgramController {
     Preconditions.checkState(getState() == State.SUSPENDED,
                              "Cannot change instance count of a flowlet without suspension.");
     flowletContext.setInstanceCount(instanceCount);
+  }
+
+  private void listenDriveState(FlowletProcessDriver driver) {
+    driver.addListener(new ServiceListenerAdapter() {
+      @Override
+      public void running() {
+        started();
+      }
+
+      @Override
+      public void failed(Service.State from, Throwable failure) {
+        LOG.error("Flowlet terminated with exception", failure);
+        error(failure);
+      }
+
+      @Override
+      public void terminated(Service.State from) {
+        if (getState() != State.STOPPING) {
+          LOG.warn("Flowlet terminated by itself");
+          // Close all consumers
+          for (ConsumerSupplier consumerSupplier : consumerSuppliers) {
+            Closeables.closeQuietly(consumerSupplier);
+          }
+        }
+      }
+    }, Threads.SAME_THREAD_EXECUTOR);
   }
 }

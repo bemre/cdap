@@ -7,13 +7,13 @@ import com.continuuity.common.metrics.MetricsCollectionService;
 import com.continuuity.common.metrics.MetricsCollector;
 import com.continuuity.common.metrics.MetricsScope;
 import com.continuuity.metrics.transport.MetricsRecord;
-import com.continuuity.weave.common.Threads;
 import com.google.common.base.Objects;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.util.concurrent.AbstractScheduledService;
+import org.apache.twill.common.Threads;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -100,6 +100,12 @@ public abstract class AggregatedMetricsCollectionService extends AbstractSchedul
   @Override
   public final MetricsCollector getCollector(final MetricsScope scope, final String context, final String runId) {
     return collectors.getUnchecked(new CollectorKey(scope, context, runId));
+  }
+
+  @Override
+  protected void shutDown() throws Exception {
+    // Flush the metrics when shutting down.
+    runOneIteration();
   }
 
   private Iterator<MetricsRecord> getMetrics(final MetricsScope scope, final long timestamp) {

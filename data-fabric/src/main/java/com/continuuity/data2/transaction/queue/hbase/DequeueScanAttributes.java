@@ -11,10 +11,10 @@ import com.google.common.io.ByteStreams;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.io.WritableUtils;
 
-import javax.annotation.Nullable;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import javax.annotation.Nullable;
 
 /**
  * Deals with dequeue scan attributes.

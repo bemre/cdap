@@ -4,16 +4,16 @@
 
 package com.continuuity.app.deploy;
 
-import com.continuuity.api.Application;
-import com.continuuity.api.ApplicationSpecification;
+import com.continuuity.api.app.Application;
+import com.continuuity.api.app.ApplicationContext;
+import com.continuuity.app.ApplicationSpecification;
+import com.continuuity.app.DefaultAppConfigurer;
 import com.continuuity.app.program.Program;
 import com.continuuity.app.program.Programs;
 import com.continuuity.internal.app.ApplicationSpecificationAdapter;
+import com.continuuity.internal.app.Specifications;
 import com.continuuity.internal.io.ReflectionSchemaGenerator;
 import com.continuuity.security.ApplicationSecurity;
-import com.continuuity.weave.filesystem.HDFSLocationFactory;
-import com.continuuity.weave.filesystem.LocalLocationFactory;
-import com.continuuity.weave.filesystem.LocationFactory;
 import com.google.common.base.Charsets;
 import com.google.common.io.Files;
 import org.apache.commons.cli.CommandLine;
@@ -22,7 +22,11 @@ import org.apache.commons.cli.GnuParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.twill.filesystem.HDFSLocationFactory;
+import org.apache.twill.filesystem.LocalLocationFactory;
+import org.apache.twill.filesystem.LocationFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -95,51 +99,66 @@ public class SandboxJVM {
     }
 
     // Load the JAR using the JAR class load and load the manifest file.
+    File unpackedJarDir = Files.createTempDir();
 
-    Object mainClass;
+    Object app;
     try {
-      if ("LOCAL".equals(locationFactory)) {
-        lf = new LocalLocationFactory();
-      } else if ("DISTRIBUTED".equals(locationFactory)) {
-        lf = new HDFSLocationFactory(new Configuration());
-      } else {
-        LOG.error("Unknown location factory specified");
+      try {
+        if ("LOCAL".equals(locationFactory)) {
+          lf = new LocalLocationFactory();
+        } else if ("DISTRIBUTED".equals(locationFactory)) {
+          lf = new HDFSLocationFactory(new Configuration());
+        } else {
+          LOG.error("Unknown location factory specified");
+          return -1;
+        }
+
+        Program archive = Programs.createWithUnpack(lf.create(jarFilename), unpackedJarDir);
+        app = archive.getMainClass().newInstance();
+      } catch (Exception e) {
+        LOG.error(e.getMessage());
         return -1;
       }
 
-      Program archive = Programs.create(lf.create(jarFilename));
-      mainClass = archive.getMainClass().newInstance();
-    } catch (Exception e) {
-      LOG.error(e.getMessage());
-      return -1;
-    }
-
-    // Convert it to the type application.
-    Application application = (Application) mainClass;
-
-    // Now, we are ready to call configure on application.
-    // Setup security manager, this setting allows only output file to be written.
-    // Nothing else can be done from here on other than creating that file.
-    ApplicationSecurity.builder()
-      .add(new FilePermission(outputFile.getAbsolutePath(), "write"))
-      .apply();
-
-    // Now, we call configure, which returns application specification.
-    ApplicationSpecification specification = application.configure();
-
-    // Convert the specification to JSON.
-    // We write the Application specification to output file in JSON format.
-    try {
-      Writer writer = Files.newWriter(outputFile, Charsets.UTF_8);
-      try {
-        // TODO: The SchemaGenerator should be injected.
-        ApplicationSpecificationAdapter.create(new ReflectionSchemaGenerator()).toJson(specification, writer);
-      } finally {
-        writer.close();
+      // Now, we are ready to call configure on application.
+      // Setup security manager, this setting allows only output file to be written.
+      // Nothing else can be done from here on other than creating that file.
+      ApplicationSecurity.builder()
+        .add(new FilePermission(outputFile.getAbsolutePath(), "write"))
+        .apply();
+  
+      // Now, we call configure, which returns application specification.
+      ApplicationSpecification specification;
+      if (app instanceof com.continuuity.api.Application) {
+        specification = Specifications.from(((com.continuuity.api.Application) app).configure());
+      } else if (app instanceof Application) {
+        DefaultAppConfigurer configurer = new DefaultAppConfigurer((Application) app);
+        ((Application) app).configure(configurer, new ApplicationContext());
+        specification = configurer.createApplicationSpec();
+      } else {
+        throw new IllegalStateException(String.format("Application main class is of invalid type: %s",
+                                                      app.getClass().getName()));
       }
-    } catch (IOException e) {
-      LOG.error("Error writing to file {}. {}", outputFile, e.getMessage());
-      return -1;
+      // Convert the specification to JSON.
+      // We write the Application specification to output file in JSON format.
+      try {
+        Writer writer = Files.newWriter(outputFile, Charsets.UTF_8);
+        try {
+          // TODO: The SchemaGenerator should be injected.
+          ApplicationSpecificationAdapter.create(new ReflectionSchemaGenerator()).toJson(specification, writer);
+        } finally {
+          writer.close();
+        }
+      } catch (IOException e) {
+        LOG.error("Error writing to file {}. {}", outputFile, e.getMessage());
+        return -1;
+      }
+    } finally {
+      try {
+        FileUtils.deleteDirectory(unpackedJarDir);
+      } catch (IOException e) {
+        LOG.warn("Error deleting temp unpacked jar directory: {}", unpackedJarDir.getAbsolutePath(), e);
+      }
     }
 
     return 0;

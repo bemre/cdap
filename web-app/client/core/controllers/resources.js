@@ -80,7 +80,7 @@ define([], function () {
 
         }
 
-        self.HTTP.rest('apps', {cache: true}, function (objects) {
+        self.HTTP.rest('apps', function (objects) {
 
           var structure = self.get('structure');
           var elements = self.get('elements');
@@ -125,8 +125,7 @@ define([], function () {
 
           }
 
-          var i = objects.length;
-          while (i--) {
+          for (var i = 0; i < objects.length; i ++) {
             objects[i] = C.App.create(objects[i]);
             structure.children.pushObject(objects[i]);
           }

@@ -4,7 +4,6 @@
 
 package com.continuuity.logging.appender.file;
 
-import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.logging.LoggingContext;
 import com.continuuity.common.logging.LoggingContextAccessor;
@@ -13,6 +12,7 @@ import com.continuuity.data2.transaction.TransactionSystemClient;
 import com.continuuity.logging.LoggingConfiguration;
 import com.continuuity.logging.appender.LogAppender;
 import com.continuuity.logging.save.LogSaver;
+import com.continuuity.logging.save.LogSaverTableUtil;
 import com.continuuity.logging.serialize.LogSchema;
 import com.continuuity.logging.serialize.LoggingEvent;
 import com.continuuity.logging.write.AvroFileWriter;
@@ -21,9 +21,7 @@ import com.continuuity.logging.write.LogCleanup;
 import com.continuuity.logging.write.LogFileWriter;
 import com.continuuity.logging.write.LogWriteEvent;
 import com.continuuity.logging.write.SimpleLogFileWriter;
-import com.continuuity.weave.common.Threads;
-import com.continuuity.weave.filesystem.Location;
-import com.continuuity.weave.filesystem.LocationFactory;
+import ch.qos.logback.classic.spi.ILoggingEvent;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
@@ -32,6 +30,9 @@ import com.google.common.util.concurrent.MoreExecutors;
 import com.google.inject.Inject;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.twill.common.Threads;
+import org.apache.twill.filesystem.Location;
+import org.apache.twill.filesystem.LocationFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,7 +49,7 @@ public class FileLogAppender extends LogAppender {
 
   public static final String APPENDER_NAME = "FileLogAppender";
 
-  private final DataSetAccessor dataSetAccessor;
+  private final LogSaverTableUtil tableUtil;
   private final TransactionSystemClient txClient;
   private final LocationFactory locationFactory;
   private final Location logBaseDir;
@@ -71,7 +72,7 @@ public class FileLogAppender extends LogAppender {
                          LocationFactory locationFactory) {
     setName(APPENDER_NAME);
 
-    this.dataSetAccessor = dataSetAccessor;
+    this.tableUtil = new LogSaverTableUtil(dataSetAccessor);
     this.txClient = txClient;
     this.locationFactory = locationFactory;
 
@@ -117,7 +118,7 @@ public class FileLogAppender extends LogAppender {
     super.start();
     try {
       logSchema = new LogSchema().getAvroSchema();
-      FileMetaDataManager fileMetaDataManager = new FileMetaDataManager(LogSaver.getMetaTable(dataSetAccessor),
+      FileMetaDataManager fileMetaDataManager = new FileMetaDataManager(tableUtil.getMetaTable(),
                                                                         txClient,
                                                                         locationFactory);
 
@@ -127,8 +128,7 @@ public class FileLogAppender extends LogAppender {
                                                          inactiveIntervalMs);
       logFileWriter = new SimpleLogFileWriter(avroFileWriter, checkpointIntervalMs);
 
-      LogCleanup logCleanup = new LogCleanup(locationFactory, fileMetaDataManager,
-                                       logBaseDir, retentionDurationMs);
+      LogCleanup logCleanup = new LogCleanup(fileMetaDataManager, logBaseDir, retentionDurationMs);
       scheduledExecutor.scheduleAtFixedRate(logCleanup, 10,
                                             logCleanupIntervalMins, TimeUnit.MINUTES);
     } catch (Exception e) {

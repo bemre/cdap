@@ -1,36 +1,58 @@
-Continuuity (tm) Reactor Development Kit - 2.0.2
+Continuuity (tm) Reactor Development Kit - ${project.version}
 
-Copyright 2012-2013 Continuuity,Inc. All Rights Reserved.
+Copyright 2014 Continuuity,Inc. All Rights Reserved.
 ================================================================================
-Continuuity Reactor Development Kit  includes a Local Reactor: a fully functioning 
-single node edition of the Continuuity Reactor runtime. You can use this edition to
+
+Continuuity Reactor Development Kit includes a Local Reactor: a fully functioning 
+single-node edition of the Continuuity Reactor runtime. You can use this edition to
 write, debug and test your Big Data applications, before deploying them to a
 remote staging or production Reactor.
 
+
 Installation
 ============
+
 To install and use Reactor and the included examples there are a few simple
 prerequisites:
 
-  1. JDK 6 (required to run Reactor, note: $JAVA_HOME should be set)
+  1. JDK 6 or JDK 7 (required to run Reactor, note: $JAVA_HOME should be set)
   2. Node.js 0.8.16+ (required to run the Reactor Dashboard)
-  3. Ant 1.8+ (required to build the example applications)
+  3. Apache Maven 3.0+ (required to build the example applications)
 
-Once you have installed the prerequisites, you should unzip the Developer Suite
-distribution to a suitable directory. E.g.
+Once you have installed the prerequisites, unzip the Developer Suite
+distribution to a suitable directory:
 
-  %> cd ~/Projects
-  %> unzip /tmp/continuuity-reactor-development-kit-2.0.2.zip
+  %> cd <path to SDK>
+  %> unzip /tmp/continuuity-sdk-${project.version}.zip
 
-You are now ready to start Reactor. Do so by running the 'continuuity-reactor' 
-script in the $CONTINUUITY/bin folder. E.g.
 
-  %> cd ~/Projects/continuuity-reactor-development-kit-2.0.2
-  %> bin/continuuity-reactor start
-  %> bin/run-example SentimentAnalysis
+Starting Continuuity Reactor
+============================
 
-Further Information
-===================
-Documentation covering the core concepts for developing applications for
-the Reactor platform can be found in Continuuity-Reactor-Developer-Guide-v2.0.2.pdf 
+You are now ready to start Reactor. Do so by running the 'reactor' 
+script in the $CONTINUUITY/bin folder:
 
+  %> cd ~/<path to SDK>/continuuity-sdk-${project.version}
+  %> ./bin/reactor.sh start
+  
+or on Windows:
+  
+  > cd ~\<path to SDK>\continuuity-sdk-${project.version}
+  > bin\reactor.bat start
+  
+
+Using Continuuity Reactor
+=========================
+
+Open a browser window to http://localhost:9999 to view the Reactor Dashboard and take our
+Quickstart tour. More information about the tour can be found online:
+ 
+  http://continuuity.com/developers/quickstart
+
+Documentation for Continuuity Reactor can be found at our developer's website:
+
+  http://continuuity.com/developers/
+
+Contacts for support, sales and general information can be found on our website at:
+
+  http://continuuity.com/contact-us

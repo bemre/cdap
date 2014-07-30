@@ -10,7 +10,6 @@ import com.continuuity.data2.dataset.lib.table.inmemory.InMemoryOcTableManager;
 import com.continuuity.data2.dataset.lib.table.inmemory.InMemoryOcTableService;
 import com.google.common.collect.Maps;
 import com.google.inject.Inject;
-import com.google.inject.name.Named;
 
 import java.util.Map;
 
@@ -19,12 +18,14 @@ import java.util.Map;
  */
 public class InMemoryDataSetAccessor extends AbstractDataSetAccessor {
   @Inject
-  public InMemoryDataSetAccessor(@Named("DataSetAccessorConfig") CConfiguration conf) {
+  public InMemoryDataSetAccessor(CConfiguration conf) {
     super(conf);
   }
 
+  @SuppressWarnings("unchecked")
   @Override
-  protected <T> T getOcTableClient(String name, ConflictDetection level) throws Exception {
+  protected <T> T getOcTableClient(String name, ConflictDetection level, int ttl) throws Exception {
+    // ttl is ignored in local mode
     return (T) new InMemoryOcTableClient(name, level);
   }
 
@@ -33,6 +34,7 @@ public class InMemoryDataSetAccessor extends AbstractDataSetAccessor {
     return new InMemoryOcTableManager();
   }
 
+  @SuppressWarnings("unchecked")
   @Override
   protected <T> T getMetricsTableClient(String name) throws Exception {
     return (T) new InMemoryMetricsTableClient(name);

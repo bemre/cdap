@@ -1,31 +1,31 @@
-/*
- * Copyright (c) 2013, Continuuity Inc
+/**
+ * Copyright 2013-2014 Continuuity, Inc.
  *
- * All rights reserved.
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ * use this file except in compliance with the License. You may obtain a copy of
+ * the License at
  *
- * Redistribution and use in source and binary forms,
- * with or without modification, are not permitted
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED
- * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
- * GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
- * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ * License for the specific language governing permissions and limitations under
+ * the License.
  */
-
 package com.continuuity.examples.wordcount;
 
 import com.continuuity.api.common.Bytes;
-import com.continuuity.api.data.DataSet;
-import com.continuuity.api.data.dataset.table.Get;
-import com.continuuity.api.data.dataset.table.Table;
+import com.continuuity.api.dataset.DatasetSpecification;
+import com.continuuity.api.dataset.lib.AbstractDataset;
+import com.continuuity.api.dataset.module.EmbeddedDataset;
+import com.continuuity.api.dataset.table.Get;
+import com.continuuity.api.dataset.table.Table;
 
 /**
  * Counts the number of unique entries seen given any number of entries.
  */
-public class UniqueCountTable extends DataSet {
+public class UniqueCountTable extends AbstractDataset {
 
   /**
    * Row and column names used for storing the unique count.
@@ -39,10 +39,12 @@ public class UniqueCountTable extends DataSet {
   private Table uniqueCountTable;
   private Table entryCountTable;
 
-  public UniqueCountTable(String name) {
-    super(name);
-    this.uniqueCountTable = new Table("unique_count_" + name);
-    this.entryCountTable = new Table("entry_count_" + name);
+  public UniqueCountTable(DatasetSpecification spec,
+                          @EmbeddedDataset("unique") Table uniqueCountTable,
+                          @EmbeddedDataset("entry") Table entryCountTable) {
+    super(spec.getName(), uniqueCountTable, entryCountTable);
+    this.uniqueCountTable = uniqueCountTable;
+    this.entryCountTable = entryCountTable;
   }
 
   /**
@@ -55,12 +57,12 @@ public class UniqueCountTable extends DataSet {
   }
 
   /**
-   * Adds the specified entry to the table and augments the specified tuple with
-   * a special field that will be used in the downstream flowlet that this tuple is
+   * Adds the specified entry to the Table and augments the specified tuple with
+   * a special field that will be used in the downstream Flowlet that this tuple is
    * sent to.
    *
-   * Continuously add entries into the table using this method, pass the tuple
-   * to another downstream flowlet, and in the second flowlet pass the tuple to
+   * Continuously add entries into the Table using this method, pass the tuple
+   * to another downstream Flowlet, and in the second Flowlet pass the tuple to
    * the {@link #updateUniqueCount(String)}.
    *
    * @param entry entry to add

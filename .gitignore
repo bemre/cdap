@@ -1,6 +1,6 @@
 *.class
 .*.swp
-
+.beamer
 # Package Files #
 *.jar
 *.war
@@ -26,9 +26,12 @@ target/
 # Node log
 npm-*.log
 logs/
+.nux_enabled
+.nux_dashboard
 
-# Singlenode run files. 
+# Singlenode and test data files.
 /data/
+/data-fabric-tests/data/
 
 # gateway test leftover
 /gateway/data/
@@ -36,3 +39,9 @@ logs/
 
 # Checkstyle report
 examples/checkstyle_report.xml
+
+# Examples Stuff
+dependency-reduced-pom.xml
+
+# Hive db Stuff
+derby.log

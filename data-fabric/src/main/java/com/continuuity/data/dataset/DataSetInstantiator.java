@@ -1,9 +1,15 @@
 package com.continuuity.data.dataset;
 
-import com.continuuity.api.data.DataSet;
 import com.continuuity.api.data.DataSetContext;
 import com.continuuity.api.data.DataSetInstantiationException;
+import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.data.DataFabric;
+import com.continuuity.data.DataSetAccessor;
+import com.continuuity.data2.datafabric.ReactorDatasetNamespace;
+import com.continuuity.data2.dataset2.DatasetFramework;
+import com.continuuity.data2.dataset2.NamespacedDatasetFramework;
+
+import java.io.Closeable;
 
 /**
  * The data set instantiator creates instances of data sets at runtime. It
@@ -20,6 +26,7 @@ import com.continuuity.data.DataFabric;
 public class DataSetInstantiator extends DataSetInstantiationBase implements DataSetContext {
 
   private final DataFabric fabric;
+  private final DatasetFramework datasetFramework;
 
   /**
    * Constructor from data fabric.
@@ -27,10 +34,13 @@ public class DataSetInstantiator extends DataSetInstantiationBase implements Dat
    * @param classLoader the class loader to use for loading data set classes.
    *                    If null, then the default class loader is used
    */
-  public DataSetInstantiator(DataFabric fabric,
-                             ClassLoader classLoader) {
-    super(classLoader);
+  public DataSetInstantiator(DataFabric fabric, DatasetFramework datasetFramework,
+                             CConfiguration configuration, ClassLoader classLoader) {
+    super(configuration, classLoader);
     this.fabric = fabric;
+    this.datasetFramework =
+      new NamespacedDatasetFramework(datasetFramework,
+                                     new ReactorDatasetNamespace(configuration, DataSetAccessor.Namespace.USER));
   }
 
   /**
@@ -39,9 +49,9 @@ public class DataSetInstantiator extends DataSetInstantiationBase implements Dat
    *  runtime into the new data set.
    *  @param dataSetName the name of the data set to instantiate
    */
-  public
-  <T extends DataSet> T getDataSet(String dataSetName)
+  @Override
+  public <T extends Closeable> T getDataSet(String dataSetName)
     throws DataSetInstantiationException {
-    return super.getDataSet(dataSetName, this.fabric);
+    return (T) super.getDataSet(dataSetName, this.fabric, this.datasetFramework);
   }
 }

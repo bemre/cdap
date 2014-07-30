@@ -15,15 +15,9 @@
  */
 package com.continuuity.hbase.wd;
 
-import java.io.IOException;
-import java.util.concurrent.Executors;
-
-import com.continuuity.data.hbase.HBaseTestBase;
-import com.google.common.util.concurrent.MoreExecutors;
+import com.continuuity.test.XSlowTests;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseTestingUtility;
-import org.apache.hadoop.hbase.HColumnDescriptor;
-import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.KeyValue;
 import org.apache.hadoop.hbase.client.Get;
 import org.apache.hadoop.hbase.client.HTable;
@@ -35,19 +29,30 @@ import org.apache.hadoop.hbase.io.ImmutableBytesWritable;
 import org.apache.hadoop.hbase.mapreduce.TableMapReduceUtil;
 import org.apache.hadoop.hbase.mapreduce.TableMapper;
 import org.apache.hadoop.hbase.util.Bytes;
+import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.MRJobConfig;
 import org.apache.hadoop.mapreduce.lib.output.NullOutputFormat;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
+import org.junit.experimental.categories.Category;
+
+import java.io.IOException;
+import java.util.concurrent.Executors;
 
 /**
  * Provides basic tests for row key distributor
  */
+@Category(XSlowTests.class)
 public abstract class RowKeyDistributorTestBase {
+
+  // Controls for test suite for whether to run BeforeClass/AfterClass
+  public static boolean runBefore = true;
+  public static boolean runAfter = true;
+
   protected static final String TABLE_NAME = "table";
   protected static final byte[] TABLE = Bytes.toBytes(TABLE_NAME);
   protected static final byte[] CF = Bytes.toBytes("colfam");
@@ -62,19 +67,37 @@ public abstract class RowKeyDistributorTestBase {
 
   @BeforeClass
   public static void beforeClass() throws Exception {
+    if (!runBefore) {
+      return;
+    }
+
     testingUtility = new HBaseTestingUtility();
-    testingUtility.startMiniZKCluster();
-    testingUtility.startMiniHBaseCluster(1, 1);
+    Configuration hConf = testingUtility.getConfiguration();
+    hConf.set("yarn.is.minicluster", "true");
+
+    // Set the JAVA_HOME env for MapReduce. In case it is missing from the host.
+    String javaHomeEnv = "JAVA_HOME=" + System.getProperty("java.home");
+    hConf.set(MRJobConfig.MR_AM_ENV, javaHomeEnv);
+    hConf.set(JobConf.MAPRED_MAP_TASK_ENV, javaHomeEnv);
+    hConf.set(JobConf.MAPRED_REDUCE_TASK_ENV, javaHomeEnv);
+
+    // Make it less annoying in Mac.
+    hConf.set(MRJobConfig.MR_AM_COMMAND_OPTS, "-Djava.awt.headless=true");
+    hConf.set(JobConf.MAPRED_MAP_TASK_JAVA_OPTS, "-Djava.awt.headless=true");
+    hConf.set(JobConf.MAPRED_REDUCE_TASK_JAVA_OPTS, "-Djava.awt.headless=true");
+
+    testingUtility.startMiniCluster(1, 1);
+    testingUtility.startMiniMapReduceCluster(1);
     hTable = testingUtility.createTable(TABLE, CF);
   }
 
   @AfterClass
   public static void afterClass() throws Exception {
-    testingUtility.deleteTable(TABLE);
-    hTable = null;
-    testingUtility.shutdownMiniHBaseCluster();
-    testingUtility.shutdownMiniZKCluster();
-    testingUtility = null;
+    if (!runAfter) {
+      return;
+    }
+    testingUtility.shutdownMiniMapReduceCluster();
+    testingUtility.shutdownMiniCluster();
   }
 
   @After
@@ -196,8 +219,7 @@ public abstract class RowKeyDistributorTestBase {
 
     // Reading data
     Configuration conf = testingUtility.getConfiguration();
-    Job job = new Job(conf, "testMapReduceInternal()-Job");
-    job.setJarByClass(this.getClass());
+    Job job = Job.getInstance(conf, "testMapReduceInternal()-Job");
     TableMapReduceUtil.initTableMapperJob(TABLE_NAME, scan,
             RowCounterMapper.class, ImmutableBytesWritable.class, Result.class, job);
 
@@ -213,6 +235,10 @@ public abstract class RowKeyDistributorTestBase {
 
     long mapInputRecords = job.getCounters().findCounter(RowCounterMapper.Counters.ROWS).getValue();
     Assert.assertEquals(valuesCountInSeekInterval, mapInputRecords);
+
+    // Need to kill the job after completion, after it could leave MRAppMaster running not terminated.
+    // Not sure what causing this, but maybe problem in MiniYarnCluster
+    job.killJob();
   }
 
   /**
@@ -221,7 +247,7 @@ public abstract class RowKeyDistributorTestBase {
    */
   static class RowCounterMapper extends TableMapper<ImmutableBytesWritable, Result> {
     /** Counter enumeration to count the actual rows. */
-    public static enum Counters {ROWS}
+    public static enum Counters { ROWS }
 
     @Override
     public void map(ImmutableBytesWritable row, Result values, Context context) throws IOException {

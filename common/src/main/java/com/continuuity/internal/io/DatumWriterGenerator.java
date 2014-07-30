@@ -4,7 +4,7 @@ import com.continuuity.common.io.Encoder;
 import com.continuuity.internal.asm.ClassDefinition;
 import com.continuuity.internal.asm.Methods;
 import com.continuuity.internal.asm.Signatures;
-import com.continuuity.common.lang.Fields;
+import com.continuuity.internal.lang.Fields;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.HashMultimap;
@@ -22,7 +22,6 @@ import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.GeneratorAdapter;
 import org.objectweb.asm.commons.Method;
 
-import javax.annotation.concurrent.NotThreadSafe;
 import java.io.IOException;
 import java.lang.reflect.ParameterizedType;
 import java.nio.Buffer;
@@ -33,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import javax.annotation.concurrent.NotThreadSafe;
 
 /**
  * Class for generating {@link DatumWriter} bytecodes using ASM. The class generated will have a skeleton looks like
@@ -283,8 +283,8 @@ final class DatumWriterGenerator {
     // Put the method into map first before generating the body in order to support recursive data type.
     encodeMethods.put(key, method);
 
-    String methodSignature = Signatures.getMethodSignature(method, new TypeToken[]{callOutputType, null, null,
-                                                                              new TypeToken<Set<Object>>() {}});
+    String methodSignature = Signatures.getMethodSignature(method, new TypeToken[]{ callOutputType, null, null,
+                                                                              new TypeToken<Set<Object>>() { }});
     GeneratorAdapter mg = new GeneratorAdapter(Opcodes.ACC_PRIVATE, method, methodSignature,
                                                new Type[]{Type.getType(IOException.class)}, classWriter);
 

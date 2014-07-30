@@ -4,17 +4,15 @@ import com.continuuity.api.common.Bytes;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.queue.QueueName;
 import com.continuuity.data.DataSetAccessor;
+import com.continuuity.data2.dataset.lib.hbase.AbstractHBaseDataSetManager;
 import com.continuuity.data2.transaction.queue.QueueAdmin;
 import com.continuuity.data2.transaction.queue.QueueConstants;
 import com.continuuity.data2.transaction.queue.QueueEntryRow;
-import com.continuuity.data2.transaction.queue.hbase.coprocessor.DequeueScanObserver;
-import com.continuuity.data2.transaction.queue.hbase.coprocessor.HBaseQueueRegionObserver;
 import com.continuuity.data2.util.hbase.HBaseTableUtil;
 import com.continuuity.hbase.wd.AbstractRowKeyDistributor;
 import com.continuuity.hbase.wd.RowKeyDistributorByHashPrefix;
-import com.continuuity.weave.filesystem.Location;
-import com.continuuity.weave.filesystem.LocationFactory;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -23,8 +21,9 @@ import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
-import com.google.inject.name.Named;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hbase.Coprocessor;
+import org.apache.hadoop.hbase.HColumnDescriptor;
 import org.apache.hadoop.hbase.HTableDescriptor;
 import org.apache.hadoop.hbase.client.Delete;
 import org.apache.hadoop.hbase.client.Get;
@@ -37,6 +36,8 @@ import org.apache.hadoop.hbase.client.ResultScanner;
 import org.apache.hadoop.hbase.client.Scan;
 import org.apache.hadoop.hbase.filter.ColumnPrefixFilter;
 import org.apache.hadoop.hbase.filter.FirstKeyOnlyFilter;
+import org.apache.twill.filesystem.Location;
+import org.apache.twill.filesystem.LocationFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,6 +50,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.Properties;
 import java.util.SortedMap;
+import java.util.concurrent.TimeUnit;
 
 import static com.continuuity.data2.transaction.queue.QueueConstants.QueueType.QUEUE;
 
@@ -56,7 +58,7 @@ import static com.continuuity.data2.transaction.queue.QueueConstants.QueueType.Q
  * admin for queues in hbase.
  */
 @Singleton
-public class HBaseQueueAdmin implements QueueAdmin {
+public class HBaseQueueAdmin extends AbstractHBaseDataSetManager implements QueueAdmin {
 
   private static final Logger LOG = LoggerFactory.getLogger(HBaseQueueAdmin.class);
 
@@ -65,33 +67,34 @@ public class HBaseQueueAdmin implements QueueAdmin {
   public static final AbstractRowKeyDistributor ROW_KEY_DISTRIBUTOR =
     new RowKeyDistributorByHashPrefix(
       new RowKeyDistributorByHashPrefix.OneByteSimpleHash(ROW_KEY_DISTRIBUTION_BUCKETS));
-  public static final Class<DequeueScanObserver> DEQUEUE_CP = DequeueScanObserver.class;
-  private static final Class[] COPROCESSORS = new Class[]{HBaseQueueRegionObserver.class, DEQUEUE_CP};
 
-  private final HBaseAdmin admin;
   private final CConfiguration cConf;
   private final LocationFactory locationFactory;
   private final String tableNamePrefix;
   private final String configTableName;
+  private final QueueConstants.QueueType type;
 
   @Inject
-  public HBaseQueueAdmin(@Named("HBaseOVCTableHandleHConfig") Configuration hConf,
-                         @Named("HBaseOVCTableHandleCConfig") CConfiguration cConf,
+  public HBaseQueueAdmin(Configuration hConf,
+                         CConfiguration cConf,
                          DataSetAccessor dataSetAccessor,
-                         LocationFactory locationFactory) throws IOException {
-    this(hConf, cConf, QUEUE, dataSetAccessor, locationFactory);
+                         LocationFactory locationFactory,
+                         HBaseTableUtil tableUtil) throws IOException {
+    this(hConf, cConf, QUEUE, dataSetAccessor, locationFactory, tableUtil);
   }
 
   protected HBaseQueueAdmin(Configuration hConf,
                             CConfiguration cConf,
                             QueueConstants.QueueType type,
                             DataSetAccessor dataSetAccessor,
-                            LocationFactory locationFactory) throws IOException {
-    this.admin = new HBaseAdmin(hConf);
+                            LocationFactory locationFactory,
+                            HBaseTableUtil tableUtil) throws IOException {
+    super(hConf, tableUtil);
     this.cConf = cConf;
     // todo: we have to do that because queues do not follow dataset semantic fully (yet)
     String unqualifiedTableNamePrefix =
       type == QUEUE ? QueueConstants.QUEUE_TABLE_PREFIX : QueueConstants.STREAM_TABLE_PREFIX;
+    this.type = type;
     this.tableNamePrefix = HBaseTableUtil.getHBaseTableName(
       dataSetAccessor.namespace(unqualifiedTableNamePrefix, DataSetAccessor.Namespace.SYSTEM));
     this.configTableName = HBaseTableUtil.getHBaseTableName(
@@ -175,6 +178,7 @@ public class HBaseQueueAdmin implements QueueAdmin {
   }
 
   boolean exists(QueueName queueName) throws IOException {
+    HBaseAdmin admin = getHBaseAdmin();
     return admin.tableExists(getActualTableName(queueName)) && admin.tableExists(configTableName);
   }
 
@@ -203,6 +207,7 @@ public class HBaseQueueAdmin implements QueueAdmin {
   }
 
   private void truncate(byte[] tableNameBytes) throws IOException {
+    HBaseAdmin admin = getHBaseAdmin();
     if (admin.tableExists(tableNameBytes)) {
       HTableDescriptor tableDescriptor = admin.getTableDescriptor(tableNameBytes);
       admin.disableTable(tableNameBytes);
@@ -244,6 +249,7 @@ public class HBaseQueueAdmin implements QueueAdmin {
   }
 
   private void drop(byte[] tableName) throws IOException {
+    HBaseAdmin admin = getHBaseAdmin();
     if (admin.tableExists(tableName)) {
       admin.disableTable(tableName);
       admin.deleteTable(tableName);
@@ -252,7 +258,7 @@ public class HBaseQueueAdmin implements QueueAdmin {
 
   private void deleteConsumerConfigurations(QueueName queueName) throws IOException {
     // we need to delete the row for this queue name from the config table
-    HTable hTable = new HTable(admin.getConfiguration(), configTableName);
+    HTable hTable = new HTable(getHBaseAdmin().getConfiguration(), configTableName);
     try {
       byte[] rowKey = queueName.toBytes();
       hTable.delete(new Delete(rowKey));
@@ -262,78 +268,123 @@ public class HBaseQueueAdmin implements QueueAdmin {
   }
 
   private void deleteConsumerConfigurations(String app, String flow) throws IOException {
-    // we need to delete the row for this queue name from the config table
-    HTable hTable = new HTable(admin.getConfiguration(), configTableName);
-    try {
-      byte[] prefix = Bytes.toBytes(QueueName.prefixForFlow(app, flow));
-      byte[] stop = Arrays.copyOf(prefix, prefix.length);
-      stop[prefix.length - 1]++; // this is safe because the last byte is always '/'
-
-      Scan scan = new Scan();
-      scan.setStartRow(prefix);
-      scan.setStopRow(stop);
-      scan.setFilter(new FirstKeyOnlyFilter());
-      scan.setMaxVersions(1);
-      ResultScanner resultScanner = hTable.getScanner(scan);
-
-      List<Delete> deletes = Lists.newArrayList();
-      Result result;
+    // table is created lazily, possible it may not exist yet.
+    HBaseAdmin admin = getHBaseAdmin();
+    if (admin.tableExists(configTableName)) {
+      // we need to delete the row for this queue name from the config table
+      HTable hTable = new HTable(admin.getConfiguration(), configTableName);
       try {
-        while ((result = resultScanner.next()) != null) {
-          byte[] row = result.getRow();
-          deletes.add(new Delete(row));
+        byte[] prefix = Bytes.toBytes(QueueName.prefixForFlow(app, flow));
+        byte[] stop = Arrays.copyOf(prefix, prefix.length);
+        stop[prefix.length - 1]++; // this is safe because the last byte is always '/'
+
+        Scan scan = new Scan();
+        scan.setStartRow(prefix);
+        scan.setStopRow(stop);
+        scan.setFilter(new FirstKeyOnlyFilter());
+        scan.setMaxVersions(1);
+        ResultScanner resultScanner = hTable.getScanner(scan);
+
+        List<Delete> deletes = Lists.newArrayList();
+        Result result;
+        try {
+          while ((result = resultScanner.next()) != null) {
+            byte[] row = result.getRow();
+            deletes.add(new Delete(row));
+          }
+        } finally {
+          resultScanner.close();
         }
+
+        hTable.delete(deletes);
+
       } finally {
-        resultScanner.close();
+        hTable.close();
       }
-
-      hTable.delete(deletes);
-
-    } finally {
-      hTable.close();
     }
   }
 
-  public void create(QueueName queueName) throws IOException {
-    String fullTableName = getActualTableName(queueName);
+  @Override
+  protected String getHBaseTableName(String name) {
+    QueueName queueName = QueueName.from(URI.create(name));
+    return getActualTableName(queueName);
+  }
 
-    // Queue Config needs to be on separate table, otherwise disabling the queue table would makes queue config
-    // not accessible by the queue region coprocessor for doing eviction.
-    byte[] tableNameBytes = Bytes.toBytes(fullTableName);
-    byte[] configTableBytes = Bytes.toBytes(configTableName);
-
-    // Create the config table first so that in case the queue table coprocessor runs, it can access the config table.
-    HBaseTableUtil.createQueueTableIfNotExists(admin, configTableBytes, QueueEntryRow.COLUMN_FAMILY,
-                                               QueueConstants.MAX_CREATE_TABLE_WAIT, 1, null);
-
-    // Create the queue table with coprocessor
-    Location jarDir = locationFactory.create(cConf.get(QueueConstants.ConfigKeys.QUEUE_TABLE_COPROCESSOR_DIR,
-                                                       QueueConstants.DEFAULT_QUEUE_TABLE_COPROCESSOR_DIR));
-    int splits = cConf.getInt(QueueConstants.ConfigKeys.QUEUE_TABLE_PRESPLITS,
-                              QueueConstants.DEFAULT_QUEUE_TABLE_PRESPLITS);
-
-    Class[] cps = getCoprocessors();
-    String[] cpNames = new String[cps.length];
-    for (int i = 0; i < cps.length; i++) {
-      cpNames[i] = cps[i].getName();
+  @Override
+  protected CoprocessorJar createCoprocessorJar() throws IOException {
+    List<? extends Class<? extends Coprocessor>> coprocessors = getCoprocessors();
+    if (coprocessors.isEmpty()) {
+      return CoprocessorJar.EMPTY;
     }
 
-    HBaseTableUtil.createQueueTableIfNotExists(admin, tableNameBytes, QueueEntryRow.COLUMN_FAMILY,
-                                               QueueConstants.MAX_CREATE_TABLE_WAIT, splits,
-                                               HBaseTableUtil.createCoProcessorJar("queue", jarDir, cps),
-                                               cpNames);
+    Location jarDir = locationFactory.create(cConf.get(QueueConstants.ConfigKeys.QUEUE_TABLE_COPROCESSOR_DIR,
+                                                       QueueConstants.DEFAULT_QUEUE_TABLE_COPROCESSOR_DIR));
+    Location jarFile = HBaseTableUtil.createCoProcessorJar(type.name().toLowerCase(), jarDir, coprocessors);
+    return new CoprocessorJar(coprocessors, jarFile);
+  }
+
+  @Override
+  protected boolean upgradeTable(HTableDescriptor tableDescriptor, Properties properties) {
+    HColumnDescriptor columnDescriptor = tableDescriptor.getFamily(QueueEntryRow.COLUMN_FAMILY);
+    if (columnDescriptor.getMaxVersions() != 1) {
+      columnDescriptor.setMaxVersions(1);
+      return true;
+    }
+    return false;
+  }
+
+  public void create(QueueName queueName) throws IOException {
+    // Queue Config needs to be on separate table, otherwise disabling the queue table would makes queue config
+    // not accessible by the queue region coprocessor for doing eviction.
+
+    // Create the config table first so that in case the queue table coprocessor runs, it can access the config table.
+    createConfigTable();
+
+    // Create the queue table
+    byte[] tableName = Bytes.toBytes(getActualTableName(queueName));
+    HTableDescriptor htd = new HTableDescriptor(tableName);
+
+    HColumnDescriptor hcd = new HColumnDescriptor(QueueEntryRow.COLUMN_FAMILY);
+    htd.addFamily(hcd);
+    hcd.setMaxVersions(1);
+
+    // Add coprocessors
+    CoprocessorJar coprocessorJar = createCoprocessorJar();
+    for (Class<? extends Coprocessor> coprocessor : coprocessorJar.getCoprocessors()) {
+      addCoprocessor(htd, coprocessor, coprocessorJar.getJarLocation());
+    }
+
+    // Create queue table with splits.
+    int splits = cConf.getInt(QueueConstants.ConfigKeys.QUEUE_TABLE_PRESPLITS,
+                              QueueConstants.DEFAULT_QUEUE_TABLE_PRESPLITS);
+    byte[][] splitKeys = HBaseTableUtil.getSplitKeys(splits);
+
+    tableUtil.createTableIfNotExists(getHBaseAdmin(), tableName, htd, splitKeys);
+  }
+
+  private void createConfigTable() throws IOException {
+    byte[] tableName = Bytes.toBytes(configTableName);
+    HTableDescriptor htd = new HTableDescriptor(tableName);
+
+    HColumnDescriptor hcd = new HColumnDescriptor(QueueEntryRow.COLUMN_FAMILY);
+    htd.addFamily(hcd);
+    hcd.setMaxVersions(1);
+
+    tableUtil.createTableIfNotExists(getHBaseAdmin(), tableName, htd, null,
+                                     QueueConstants.MAX_CREATE_TABLE_WAIT, TimeUnit.MILLISECONDS);
   }
 
   /**
    * @return coprocessors to set for the {@link HTable}
    */
-  protected Class[] getCoprocessors() {
-    return COPROCESSORS;
+  protected List<? extends Class<? extends Coprocessor>> getCoprocessors() {
+    return ImmutableList.of(tableUtil.getQueueRegionObserverClassForVersion(),
+                            tableUtil.getDequeueScanObserverClassForVersion());
   }
 
   @Override
   public void dropAll() throws Exception {
-    for (HTableDescriptor desc : admin.listTables()) {
+    for (HTableDescriptor desc : getHBaseAdmin().listTables()) {
       String tableName = Bytes.toString(desc.getName());
       // It's important to keep config table enabled while disabling queue tables.
       if (tableName.startsWith(tableNamePrefix) && !tableName.equals(configTableName)) {
@@ -352,7 +403,7 @@ public class HBaseQueueAdmin implements QueueAdmin {
       create(queueName);
     }
 
-    HTable hTable = new HTable(admin.getConfiguration(), configTableName);
+    HTable hTable = new HTable(getHBaseAdmin().getConfiguration(), configTableName);
 
     try {
       byte[] rowKey = queueName.toBytes();
@@ -386,7 +437,7 @@ public class HBaseQueueAdmin implements QueueAdmin {
       create(queueName);
     }
 
-    HTable hTable = new HTable(admin.getConfiguration(), configTableName);
+    HTable hTable = new HTable(getHBaseAdmin().getConfiguration(), configTableName);
 
     try {
       byte[] rowKey = queueName.toBytes();
@@ -450,6 +501,19 @@ public class HBaseQueueAdmin implements QueueAdmin {
     }
   }
 
+  @Override
+  public void upgrade() throws Exception {
+    // For each table managed by this admin, performs an upgrade
+    Properties properties = new Properties();
+    for (HTableDescriptor desc : getHBaseAdmin().listTables()) {
+      String tableName = Bytes.toString(desc.getName());
+      // It's important to skip config table enabled.
+      if (tableName.startsWith(tableNamePrefix) && !tableName.equals(configTableName)) {
+        upgradeTable(tableName, properties);
+      }
+    }
+  }
+
   private byte[] decodeGroupInfo(Map<Long, Integer> groupInfo,
                                  Map<byte[], byte[]> columns, Map<Long, Integer> oldGroupInfo) {
     byte[] smallest = null;
@@ -483,35 +547,29 @@ public class HBaseQueueAdmin implements QueueAdmin {
 
     int oldInstances = consumerStates.size();
 
-    // If size increase, simply pick the lowest startRow from existing instances as startRow for the new instance
-    if (instances > oldInstances) {
-      // Set the startRow of the new instances to the smallest among existing
-      Put put = new Put(rowKey);
-      for (int i = oldInstances; i < instances; i++) {
-        new HBaseConsumerState(smallest, groupId, i).updatePut(put);
+    // When group size changed, reset all instances startRow to smallest startRow
+    Put put = new Put(rowKey);
+    Delete delete = new Delete(rowKey);
+    for (HBaseConsumerState consumerState : consumerStates) {
+      HBaseConsumerState newState = new HBaseConsumerState(smallest,
+                                                           consumerState.getGroupId(),
+                                                           consumerState.getInstanceId());
+      if (consumerState.getInstanceId() < instances) {
+        // Updates to smallest rowKey
+        newState.updatePut(put);
+      } else {
+        // Delete old instances
+        newState.delete(delete);
       }
+    }
+    // For all new instances, set startRow to smallest
+    for (int i = oldInstances; i < instances; i++) {
+      new HBaseConsumerState(smallest, groupId, i).updatePut(put);
+    }
+    if (!put.isEmpty()) {
       mutations.add(put);
-
-    } else {
-      // If size decrease, reset all remaining instances startRow to min(smallest, startRow)
-      // The map is sorted by instance ID
-      Put put = new Put(rowKey);
-      Delete delete = new Delete(rowKey);
-      for (HBaseConsumerState consumerState : consumerStates) {
-        HBaseConsumerState newState = new HBaseConsumerState(smallest,
-                                                             consumerState.getGroupId(),
-                                                             consumerState.getInstanceId());
-        if (consumerState.getInstanceId() < instances) {
-          // Updates to smallest rowKey
-          newState.updatePut(put);
-        } else {
-          // Delete old instances
-          newState.delete(delete);
-        }
-      }
-      if (!put.isEmpty()) {
-        mutations.add(put);
-      }
+    }
+    if (!delete.isEmpty()) {
       mutations.add(delete);
     }
 

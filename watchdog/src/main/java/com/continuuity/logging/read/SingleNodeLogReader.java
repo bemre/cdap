@@ -13,10 +13,9 @@ import com.continuuity.logging.context.LoggingContextHelper;
 import com.continuuity.logging.filter.AndFilter;
 import com.continuuity.logging.filter.Filter;
 import com.continuuity.logging.save.LogSaver;
+import com.continuuity.logging.save.LogSaverTableUtil;
 import com.continuuity.logging.serialize.LogSchema;
 import com.continuuity.logging.write.FileMetaDataManager;
-import com.continuuity.weave.common.Threads;
-import com.continuuity.weave.filesystem.Location;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
@@ -25,6 +24,9 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.inject.Inject;
 import org.apache.avro.Schema;
+import org.apache.twill.common.Threads;
+import org.apache.twill.filesystem.LocalLocationFactory;
+import org.apache.twill.filesystem.Location;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,14 +56,14 @@ public class SingleNodeLogReader implements LogReader {
   @Inject
   public SingleNodeLogReader(CConfiguration cConf, DataSetAccessor dataSetAccessor,
                              TransactionSystemClient txClient,
-                             SeekableLocalLocationFactory locationFactory) {
+                             LocalLocationFactory locationFactory) {
     String baseDir = cConf.get(LoggingConfiguration.LOG_BASE_DIR);
     Preconditions.checkNotNull(baseDir, "Log base dir cannot be null");
 
     try {
       this.schema = new LogSchema().getAvroSchema();
-      this.fileMetaDataManager = new FileMetaDataManager(LogSaver.getMetaTable(dataSetAccessor), txClient,
-                                                         locationFactory);
+      this.fileMetaDataManager = new FileMetaDataManager(new LogSaverTableUtil(dataSetAccessor).getMetaTable(),
+                                                         txClient, locationFactory);
 
     } catch (Exception e) {
       LOG.error("Got exception", e);

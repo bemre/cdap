@@ -4,6 +4,7 @@ import com.continuuity.api.common.Bytes;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.conf.Constants;
 import com.continuuity.gateway.GatewayFastTestsSuite;
+import com.continuuity.gateway.GatewayTestBase;
 import org.apache.flume.Event;
 import org.apache.flume.EventDeliveryException;
 import org.apache.flume.api.RpcClient;
@@ -25,14 +26,14 @@ import java.util.Map;
 /**
  * Test netty flume collector.
  */
-public class NettyFlumeCollectorTest {
+public class NettyFlumeCollectorTest extends GatewayTestBase {
   private static final String hostname = "localhost";
 
   @Test
   public void testFlumeEnqueue() throws Exception {
-    CConfiguration cConfig = GatewayFastTestsSuite.getInjector().getInstance(CConfiguration.class);
+    CConfiguration cConfig = GatewayTestBase.getInjector().getInstance(CConfiguration.class);
     cConfig.setInt(Constants.Gateway.STREAM_FLUME_PORT, 0);
-    NettyFlumeCollector flumeCollector = GatewayFastTestsSuite.getInjector().getInstance(NettyFlumeCollector.class);
+    NettyFlumeCollector flumeCollector = GatewayTestBase.getInjector().getInstance(NettyFlumeCollector.class);
     flumeCollector.startAndWait();
     int port = flumeCollector.getPort();
 
@@ -58,14 +59,14 @@ public class NettyFlumeCollectorTest {
     // Get new consumer id
     response = GatewayFastTestsSuite.doPost("/v2/streams/" + streamName + "/consumer-id", null);
     Assert.assertEquals(HttpResponseStatus.OK.getCode(), response.getStatusLine().getStatusCode());
-    Assert.assertEquals(1, response.getHeaders(Constants.Gateway.HEADER_STREAM_CONSUMER).length);
-    String groupId = response.getFirstHeader(Constants.Gateway.HEADER_STREAM_CONSUMER).getValue();
+    Assert.assertEquals(1, response.getHeaders(Constants.Stream.Headers.CONSUMER_ID).length);
+    String groupId = response.getFirstHeader(Constants.Stream.Headers.CONSUMER_ID).getValue();
 
     // Dequeue all entries
     for (int i = 0; i <= 12; ++i) {
       response = GatewayFastTestsSuite.doPost("/v2/streams/" + streamName + "/dequeue", null,
                                              new Header[]{
-                                               new BasicHeader(Constants.Gateway.HEADER_STREAM_CONSUMER, groupId)
+                                               new BasicHeader(Constants.Stream.Headers.CONSUMER_ID, groupId)
                                              });
       Assert.assertEquals("Item " + i, HttpResponseStatus.OK.getCode(), response.getStatusLine().getStatusCode());
       String actual = EntityUtils.toString(response.getEntity());
@@ -76,7 +77,7 @@ public class NettyFlumeCollectorTest {
     // No more content
     response = GatewayFastTestsSuite.doPost("/v2/streams/" + streamName + "/dequeue", null,
                                            new Header[]{
-                                             new BasicHeader(Constants.Gateway.HEADER_STREAM_CONSUMER, groupId)
+                                             new BasicHeader(Constants.Stream.Headers.CONSUMER_ID, groupId)
                                            });
     Assert.assertEquals("No item", HttpResponseStatus.NO_CONTENT.getCode(), response.getStatusLine().getStatusCode());
   }
@@ -85,8 +86,8 @@ public class NettyFlumeCollectorTest {
     SimpleEvent event = new SimpleEvent();
     Map<String, String> headers = new HashMap<String, String>();
     headers.put("messageNumber", Integer.toString(i));
-    headers.put(com.continuuity.gateway.Constants.HEADER_DESTINATION_STREAM, dest);
-    Header authHeader = GatewayFastTestsSuite.getAuthHeader();
+    headers.put(Constants.Gateway.HEADER_DESTINATION_STREAM, dest);
+    Header authHeader = GatewayTestBase.getAuthHeader();
     headers.put(authHeader.getName(), authHeader.getValue());
     event.setHeaders(headers);
     event.setBody(Bytes.toBytes("This is a message " + i));

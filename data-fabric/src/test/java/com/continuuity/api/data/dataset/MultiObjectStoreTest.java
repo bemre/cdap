@@ -4,9 +4,11 @@ import com.continuuity.api.common.Bytes;
 import com.continuuity.api.data.DataSet;
 import com.continuuity.api.data.batch.Split;
 import com.continuuity.api.data.batch.SplitReader;
+import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.utils.ImmutablePair;
 import com.continuuity.data.dataset.DataSetInstantiator;
 import com.continuuity.data.dataset.DataSetTestBase;
+import com.continuuity.data.dataset.DatasetCreationSpec;
 import com.continuuity.data2.transaction.TransactionContext;
 import com.continuuity.internal.io.UnsupportedTypeException;
 import com.google.common.collect.Lists;
@@ -16,6 +18,7 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -34,10 +37,10 @@ public class MultiObjectStoreTest extends DataSetTestBase {
   public static void configure() throws Exception {
     DataSet stringStore = new MultiObjectStore<String>("strings", String.class);
     DataSet pairStore = new MultiObjectStore<ImmutablePair<Integer, String>>(
-      "pairs", new TypeToken<ImmutablePair<Integer, String>>(){}.getType());
+      "pairs", new TypeToken<ImmutablePair<Integer, String>>() { }.getType());
     DataSet customStore = new MultiObjectStore<Custom>("customs", Custom.class);
     DataSet innerStore = new MultiObjectStore<CustomWithInner.Inner<Integer>>(
-      "inners", new TypeToken<CustomWithInner.Inner<Integer>>(){}.getType());
+      "inners", new TypeToken<CustomWithInner.Inner<Integer>>() { }.getType());
     DataSet batchStore = new MultiObjectStore<String>("batch", String.class);
     DataSet batchTestsMultiCol = new MultiObjectStore<String>("batchTestsMultiCol", String.class);
 
@@ -169,8 +172,8 @@ public class MultiObjectStoreTest extends DataSetTestBase {
       }
     };
     // create an instantiator that uses the dummy class loader
-    DataSetInstantiator inst = new DataSetInstantiator(fabric, loader);
-    inst.setDataSets(specs);
+    DataSetInstantiator inst = new DataSetInstantiator(fabric, datasetFramework, CConfiguration.create(), loader);
+    inst.setDataSets(specs, Collections.<DatasetCreationSpec>emptyList());
     // use that instantiator to get a data set instance
     inst.getDataSet("customs");
     // verify the class name was recorded (the dummy class loader was used).

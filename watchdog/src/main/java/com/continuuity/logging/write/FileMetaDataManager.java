@@ -5,20 +5,20 @@
 package com.continuuity.logging.write;
 
 import com.continuuity.api.common.Bytes;
-import com.continuuity.data2.OperationException;
 import com.continuuity.common.logging.LoggingContext;
 import com.continuuity.common.utils.ImmutablePair;
 import com.continuuity.data.table.Scanner;
+import com.continuuity.data2.OperationException;
 import com.continuuity.data2.dataset.lib.table.OrderedColumnarTable;
 import com.continuuity.data2.transaction.DefaultTransactionExecutor;
 import com.continuuity.data2.transaction.TransactionAware;
 import com.continuuity.data2.transaction.TransactionExecutor;
 import com.continuuity.data2.transaction.TransactionSystemClient;
-import com.continuuity.weave.filesystem.Location;
-import com.continuuity.weave.filesystem.LocationFactory;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSortedMap;
 import com.google.common.collect.Maps;
+import org.apache.twill.filesystem.Location;
+import org.apache.twill.filesystem.LocationFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

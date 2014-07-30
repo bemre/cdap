@@ -2,10 +2,10 @@ package com.continuuity.data;
 
 import com.continuuity.data2.dataset.api.DataSetManager;
 
-import javax.annotation.Nullable;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import javax.annotation.Nullable;
 
 /**
  * interface for getting dataset clients and managers.
@@ -43,9 +43,11 @@ public interface DataSetAccessor {
     SYSTEM("system");
 
     private final String name;
+    private final String prefix;
 
     private Namespace(String name) {
       this.name = name;
+      this.prefix = name + ".";
     }
 
     String getName() {
@@ -53,7 +55,11 @@ public interface DataSetAccessor {
     }
 
     public String namespace(String datasetName) {
-      return name + "." + datasetName;
+      return prefix + datasetName;
+    }
+
+    public String fromNamespaced(String namespacedDatasetName) {
+      return namespacedDatasetName.substring(prefix.length());
     }
   }
 

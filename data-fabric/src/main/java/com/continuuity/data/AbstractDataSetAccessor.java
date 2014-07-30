@@ -7,9 +7,10 @@ import com.continuuity.data2.dataset.lib.table.MetricsTable;
 import com.continuuity.data2.dataset.lib.table.OrderedColumnarTable;
 import com.continuuity.data2.dataset.lib.table.inmemory.InMemoryOcTableClient;
 import com.continuuity.data2.dataset.lib.table.inmemory.InMemoryOcTableManager;
+import com.continuuity.data2.transaction.TxConstants;
 
-import javax.annotation.Nullable;
 import java.util.Properties;
+import javax.annotation.Nullable;
 
 /**
  * TODO: Having this class is a bad design: we want to add more dataset types to a system without changing core code.
@@ -20,13 +21,13 @@ public abstract class AbstractDataSetAccessor extends NamespacingDataSetAccessor
     super(conf);
   }
 
-  protected abstract <T> T getOcTableClient(String name,
-                                            ConflictDetection level) throws Exception;
+  protected abstract <T> T getOcTableClient(String name, ConflictDetection level, int ttl) throws Exception;
   protected abstract DataSetManager getOcTableManager() throws Exception;
 
   protected abstract <T> T getMetricsTableClient(String name) throws Exception;
   protected abstract DataSetManager getMetricsTableManager() throws Exception;
 
+  @SuppressWarnings("unchecked")
   @Override
   protected  final <T> T getDataSetClient(String name,
                                           Class<? extends T> type,
@@ -38,13 +39,16 @@ public abstract class AbstractDataSetAccessor extends NamespacingDataSetAccessor
 
     } else if (type == OrderedColumnarTable.class) {
       ConflictDetection level = null;
+      int ttl = -1;
       if (props != null) {
         String levelProperty = props.getProperty("conflict.level");
         level = levelProperty == null ? null : ConflictDetection.valueOf(levelProperty);
+        String ttlProperty = props.getProperty(TxConstants.PROPERTY_TTL);
+        ttl = ttlProperty == null ? -1 : Integer.valueOf(ttlProperty);
       }
       // using ROW by default
       level = level == null ? ConflictDetection.ROW : level;
-      return getOcTableClient(name, level);
+      return getOcTableClient(name, level, ttl);
     }
     if (type == MetricsTable.class) {
       return getMetricsTableClient(name);

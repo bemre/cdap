@@ -4,7 +4,6 @@
 
 package com.continuuity.internal.app.runtime.flow;
 
-import com.continuuity.api.ApplicationSpecification;
 import com.continuuity.api.annotation.Batch;
 import com.continuuity.api.annotation.HashPartition;
 import com.continuuity.api.annotation.ProcessInput;
@@ -21,6 +20,9 @@ import com.continuuity.api.flow.flowlet.Flowlet;
 import com.continuuity.api.flow.flowlet.FlowletSpecification;
 import com.continuuity.api.flow.flowlet.InputContext;
 import com.continuuity.api.flow.flowlet.OutputEmitter;
+import com.continuuity.api.flow.flowlet.StreamEvent;
+import com.continuuity.api.stream.StreamEventData;
+import com.continuuity.app.ApplicationSpecification;
 import com.continuuity.app.Id;
 import com.continuuity.app.program.Program;
 import com.continuuity.app.program.Type;
@@ -30,6 +32,7 @@ import com.continuuity.app.queue.QueueSpecificationGenerator.Node;
 import com.continuuity.app.runtime.ProgramController;
 import com.continuuity.app.runtime.ProgramOptions;
 import com.continuuity.app.runtime.ProgramRunner;
+import com.continuuity.common.async.ExecutorUtils;
 import com.continuuity.common.io.BinaryDecoder;
 import com.continuuity.common.lang.InstantiatorFactory;
 import com.continuuity.common.lang.PropertyFieldSetter;
@@ -38,11 +41,15 @@ import com.continuuity.common.logging.logback.CAppender;
 import com.continuuity.common.metrics.MetricsCollectionService;
 import com.continuuity.common.queue.QueueName;
 import com.continuuity.data.dataset.DataSetInstantiationBase;
+import com.continuuity.data.stream.StreamCoordinator;
+import com.continuuity.data.stream.StreamPropertyListener;
 import com.continuuity.data2.queue.ConsumerConfig;
 import com.continuuity.data2.queue.DequeueStrategy;
+import com.continuuity.data2.queue.Queue2Consumer;
 import com.continuuity.data2.queue.Queue2Producer;
 import com.continuuity.data2.queue.QueueClientFactory;
 import com.continuuity.data2.transaction.queue.QueueMetrics;
+import com.continuuity.data2.transaction.stream.StreamConsumer;
 import com.continuuity.internal.app.queue.QueueReaderFactory;
 import com.continuuity.internal.app.queue.RoundRobinQueueReader;
 import com.continuuity.internal.app.queue.SimpleQueueSpecificationGenerator;
@@ -52,6 +59,7 @@ import com.continuuity.internal.app.runtime.DataSetFieldSetter;
 import com.continuuity.internal.app.runtime.DataSets;
 import com.continuuity.internal.app.runtime.MetricsFieldSetter;
 import com.continuuity.internal.app.runtime.ProgramOptionConstants;
+import com.continuuity.internal.app.runtime.ProgramServiceDiscovery;
 import com.continuuity.internal.io.ByteBufferInputStream;
 import com.continuuity.internal.io.DatumWriterFactory;
 import com.continuuity.internal.io.ReflectionDatumReader;
@@ -60,8 +68,6 @@ import com.continuuity.internal.io.SchemaGenerator;
 import com.continuuity.internal.io.UnsupportedTypeException;
 import com.continuuity.internal.lang.Reflections;
 import com.continuuity.internal.specification.FlowletMethod;
-import com.continuuity.weave.api.RunId;
-import com.continuuity.weave.internal.RunIds;
 import com.google.common.base.Function;
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
@@ -73,11 +79,16 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.common.collect.Table;
 import com.google.common.reflect.TypeToken;
+import com.google.common.util.concurrent.AbstractService;
+import com.google.common.util.concurrent.Service;
 import com.google.inject.Inject;
+import org.apache.twill.api.RunId;
+import org.apache.twill.common.Cancellable;
+import org.apache.twill.common.Threads;
+import org.apache.twill.internal.RunIds;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
 import java.io.IOException;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
@@ -87,6 +98,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executor;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import javax.annotation.Nullable;
 
 /**
  *
@@ -98,26 +114,34 @@ public final class FlowletProgramRunner implements ProgramRunner {
   private final SchemaGenerator schemaGenerator;
   private final DatumWriterFactory datumWriterFactory;
   private final DataFabricFacadeFactory dataFabricFacadeFactory;
+  private final StreamCoordinator streamCoordinator;
   private final QueueReaderFactory queueReaderFactory;
   private final MetricsCollectionService metricsCollectionService;
+  private final ProgramServiceDiscovery serviceDiscovery;
 
   @Inject
-  public FlowletProgramRunner(SchemaGenerator schemaGenerator, DatumWriterFactory datumWriterFactory,
-                              DataFabricFacadeFactory dataFabricFacadeFactory,
+  public FlowletProgramRunner(SchemaGenerator schemaGenerator,
+                              DatumWriterFactory datumWriterFactory,
+                              DataFabricFacadeFactory dataFabricFacadeFactory, StreamCoordinator streamCoordinator,
                               QueueReaderFactory queueReaderFactory,
-                              MetricsCollectionService metricsCollectionService) {
+                              MetricsCollectionService metricsCollectionService,
+                              ProgramServiceDiscovery serviceDiscovery) {
     this.schemaGenerator = schemaGenerator;
     this.datumWriterFactory = datumWriterFactory;
     this.dataFabricFacadeFactory = dataFabricFacadeFactory;
+    this.streamCoordinator = streamCoordinator;
     this.queueReaderFactory = queueReaderFactory;
     this.metricsCollectionService = metricsCollectionService;
+    this.serviceDiscovery = serviceDiscovery;
   }
 
+  @SuppressWarnings("unused")
   @Inject(optional = true)
   void setLogWriter(LogWriter logWriter) {
     CAppender.logWriter = logWriter;
   }
 
+  @SuppressWarnings("unchecked")
   @Override
   public ProgramController run(Program program, ProgramOptions options) {
     BasicFlowletContext flowletContext = null;
@@ -167,13 +191,13 @@ public final class FlowletProgramRunner implements ProgramRunner {
       flowletContext = new BasicFlowletContext(program, flowletName, instanceId,
                                                runId, instanceCount,
                                                DataSets.createDataSets(dataSetContext, flowletDef.getDatasets()),
-                                               options.getUserArguments(),
-                                               flowletDef.getFlowletSpec(),
-                                               metricsCollectionService);
+                                               options.getUserArguments(), flowletDef.getFlowletSpec(),
+                                               metricsCollectionService, serviceDiscovery);
 
       // hack for propagating metrics collector to datasets
       if (dataSetContext instanceof DataSetInstantiationBase) {
-        ((DataSetInstantiationBase) dataSetContext).setMetricsCollector(flowletContext.getSystemMetrics());
+        ((DataSetInstantiationBase) dataSetContext).setMetricsCollector(metricsCollectionService,
+                                                                        flowletContext.getSystemMetrics());
       }
 
       // Creates QueueSpecification
@@ -184,6 +208,10 @@ public final class FlowletProgramRunner implements ProgramRunner {
       Flowlet flowlet = new InstantiatorFactory(false).get(TypeToken.of(flowletClass)).create();
       TypeToken<? extends Flowlet> flowletType = TypeToken.of(flowletClass);
 
+      // Set the context classloader to the reactor classloader. It is needed for the DatumWriterFactory be able
+      // to load reactor classes
+      Thread.currentThread().setContextClassLoader(FlowletProgramRunner.class.getClassLoader());
+
       // Inject DataSet, OutputEmitter, Metric fields
       Reflections.visit(flowlet, TypeToken.of(flowlet.getClass()),
                         new PropertyFieldSetter(flowletDef.getFlowletSpec().getProperties()),
@@ -192,30 +220,36 @@ public final class FlowletProgramRunner implements ProgramRunner {
                         new OutputEmitterFieldSetter(outputEmitterFactory(flowletContext, flowletName,
                                                                           dataFabricFacade, queueSpecs)));
 
-      ImmutableList.Builder<QueueConsumerSupplier> queueConsumerSupplierBuilder = ImmutableList.builder();
+      ImmutableList.Builder<ConsumerSupplier<?>> queueConsumerSupplierBuilder = ImmutableList.builder();
       Collection<ProcessSpecification> processSpecs =
         createProcessSpecification(flowletContext, flowletType,
                                    processMethodFactory(flowlet),
-                                   processSpecificationFactory(dataFabricFacade, queueReaderFactory, flowletName,
-                                                               queueSpecs, queueConsumerSupplierBuilder,
+                                   processSpecificationFactory(flowletContext, dataFabricFacade, queueReaderFactory,
+                                                               flowletName, queueSpecs, queueConsumerSupplierBuilder,
                                                                createSchemaCache(program)),
                                    Lists.<ProcessSpecification>newLinkedList());
-      List<QueueConsumerSupplier> queueConsumerSuppliers = queueConsumerSupplierBuilder.build();
+      List<ConsumerSupplier<?>> consumerSuppliers = queueConsumerSupplierBuilder.build();
 
+      // Create the flowlet driver
+      AtomicReference<FlowletProgramController> controllerRef = new AtomicReference<FlowletProgramController>();
+      Service serviceHook = createServiceHook(flowletName, consumerSuppliers, controllerRef);
       FlowletProcessDriver driver = new FlowletProcessDriver(flowlet, flowletContext, processSpecs,
                                                              createCallback(flowlet, flowletDef.getFlowletSpec()),
-                                                             dataFabricFacade);
+                                                             dataFabricFacade, serviceHook);
 
       if (disableTransaction) {
         LOG.info("Transaction disabled for flowlet {}", flowletContext);
       }
+
+      FlowletProgramController controller = new FlowletProgramController(program.getName(), flowletName,
+                                                                         flowletContext, driver, consumerSuppliers);
+      controllerRef.set(controller);
+
       LOG.info("Starting flowlet: {}", flowletContext);
       driver.start();
       LOG.info("Flowlet started: {}", flowletContext);
 
-
-      return new FlowletProgramController(program.getName(), flowletName,
-                                          flowletContext, driver, queueConsumerSuppliers);
+      return controller;
 
     } catch (Exception e) {
       // something went wrong before the flowlet even started. Make sure we release all resources (datasets, ...)
@@ -236,6 +270,7 @@ public final class FlowletProgramRunner implements ProgramRunner {
    * @param result A {@link Collection} for storing newly created {@link ProcessSpecification}.
    * @return The same {@link Collection} as the {@code result} parameter.
    */
+  @SuppressWarnings("unchecked")
   private Collection<ProcessSpecification> createProcessSpecification(BasicFlowletContext flowletContext,
                                                                       TypeToken<? extends Flowlet> flowletType,
                                                                       ProcessMethodFactory processMethodFactory,
@@ -294,11 +329,11 @@ public final class FlowletProgramRunner implements ProgramRunner {
           Integer processBatchSize = getBatchSize(method);
 
           if (processBatchSize != null) {
-            Preconditions.checkArgument(dataType.getRawType().equals(Iterator.class),
-                                        "Only Iterator is supported.");
-            Preconditions.checkArgument(dataType.getType() instanceof ParameterizedType,
-                                        "Only ParameterizedType is supported for batch Iterator.");
-            dataType = flowletType.resolveType(((ParameterizedType) dataType.getType()).getActualTypeArguments()[0]);
+            if (dataType.getRawType().equals(Iterator.class)) {
+              Preconditions.checkArgument(dataType.getType() instanceof ParameterizedType,
+                                          "Only ParameterizedType is supported for batch Iterator.");
+              dataType = flowletType.resolveType(((ParameterizedType) dataType.getType()).getActualTypeArguments()[0]);
+            }
             batchSize = processBatchSize;
           }
 
@@ -418,7 +453,7 @@ public final class FlowletProgramRunner implements ProgramRunner {
                   // no-op
                 }
               });
-              return new DatumOutputEmitter<T>(producer,  schema, datumWriterFactory.create(type, schema));
+              return new DatumOutputEmitter<T>(producer, schema, datumWriterFactory.create(type, schema));
             }
           }
 
@@ -435,24 +470,25 @@ public final class FlowletProgramRunner implements ProgramRunner {
   private ProcessMethodFactory processMethodFactory(final Flowlet flowlet) {
     return new ProcessMethodFactory() {
       @Override
-      public ProcessMethod create(Method method, int maxRetries) {
+      public <T> ProcessMethod<T> create(Method method, int maxRetries) {
         return ReflectionProcessMethod.create(flowlet, method, maxRetries);
       }
     };
   }
 
   private ProcessSpecificationFactory processSpecificationFactory(
-    final DataFabricFacade dataFabricFacade, final QueueReaderFactory queueReaderFactory,
-    final String flowletName, final Table<Node, String, Set<QueueSpecification>> queueSpecs,
-    final ImmutableList.Builder<QueueConsumerSupplier> queueConsumerSupplierBuilder,
+    final BasicFlowletContext flowletContext, final DataFabricFacade dataFabricFacade,
+    final QueueReaderFactory queueReaderFactory, final String flowletName,
+    final Table<Node, String, Set<QueueSpecification>> queueSpecs,
+    final ImmutableList.Builder<ConsumerSupplier<?>> queueConsumerSupplierBuilder,
     final SchemaCache schemaCache) {
 
     return new ProcessSpecificationFactory() {
       @Override
       public <T> ProcessSpecification create(Set<String> inputNames, Schema schema, TypeToken<T> dataType,
-                                             ProcessMethod method, ConsumerConfig consumerConfig, int batchSize,
+                                             ProcessMethod<T> method, ConsumerConfig consumerConfig, int batchSize,
                                              Tick tickAnnotation) {
-        List<QueueReader> queueReaders = Lists.newLinkedList();
+        List<QueueReader<T>> queueReaders = Lists.newLinkedList();
 
         for (Map.Entry<Node, Set<QueueSpecification>> entry : queueSpecs.column(flowletName).entrySet()) {
           for (QueueSpecification queueSpec : entry.getValue()) {
@@ -462,14 +498,32 @@ public final class FlowletProgramRunner implements ProgramRunner {
               && (inputNames.contains(queueName.getSimpleName())
               || inputNames.contains(FlowletDefinition.ANY_INPUT))) {
 
-              int numGroups = (entry.getKey().getType() == FlowletConnection.Type.STREAM)
-                ? -1
-                : getNumGroups(Iterables.concat(queueSpecs.row(entry.getKey()).values()), queueName);
+              if (entry.getKey().getType() == FlowletConnection.Type.STREAM) {
+                ConsumerSupplier<StreamConsumer> consumerSupplier = ConsumerSupplier.create(dataFabricFacade,
+                                                                                            queueName, consumerConfig);
+                queueConsumerSupplierBuilder.add(consumerSupplier);
+                // No decoding is needed, as a process method can only have StreamEvent as type for consuming stream
+                Function<StreamEvent, T> decoder = wrapInputDecoder(flowletContext,
+                                                                    queueName, new Function<StreamEvent, T>() {
+                  @Override
+                  @SuppressWarnings("unchecked")
+                  public T apply(StreamEvent input) {
+                    return (T) input;
+                  }
+                });
 
-              QueueConsumerSupplier consumerSupplier = new QueueConsumerSupplier(dataFabricFacade,
-                                                                                 queueName, consumerConfig, numGroups);
-              queueConsumerSupplierBuilder.add(consumerSupplier);
-              queueReaders.add(queueReaderFactory.create(consumerSupplier, batchSize));
+                queueReaders.add(queueReaderFactory.createStreamReader(consumerSupplier, batchSize, decoder));
+
+              } else {
+                int numGroups = getNumGroups(Iterables.concat(queueSpecs.row(entry.getKey()).values()), queueName);
+                Function<ByteBuffer, T> decoder =
+                  wrapInputDecoder(flowletContext, queueName, createInputDatumDecoder(dataType, schema, schemaCache));
+
+                ConsumerSupplier<Queue2Consumer> consumerSupplier = ConsumerSupplier.create(dataFabricFacade, queueName,
+                                                                                            consumerConfig, numGroups);
+                queueConsumerSupplierBuilder.add(consumerSupplier);
+                queueReaders.add(queueReaderFactory.createQueueReader(consumerSupplier, batchSize, decoder));
+              }
             }
           }
         }
@@ -478,9 +532,7 @@ public final class FlowletProgramRunner implements ProgramRunner {
         if (!inputNames.isEmpty() && queueReaders.isEmpty()) {
           return null;
         }
-        return new ProcessSpecification<T>(new RoundRobinQueueReader(queueReaders),
-                                           createInputDatumDecoder(dataType, schema, schemaCache),
-                                           method, tickAnnotation);
+        return new ProcessSpecification<T>(new RoundRobinQueueReader<T>(queueReaders), method, tickAnnotation);
       }
     };
   }
@@ -515,7 +567,23 @@ public final class FlowletProgramRunner implements ProgramRunner {
     };
   }
 
-  private SchemaCache createSchemaCache(Program program) throws ClassNotFoundException {
+  private <S, T> Function<S, T> wrapInputDecoder(final BasicFlowletContext context,
+                                                 final QueueName queueName,
+                                                 final Function<S, T> inputDecoder) {
+    final String eventsMetricsName = "process.events.in";
+    final String eventsMetricsTag = queueName.getSimpleName();
+    return new Function<S, T>() {
+      @Override
+      public T apply(S source) {
+        context.getSystemMetrics().gauge(eventsMetricsName, 1, eventsMetricsTag);
+        context.getSystemMetrics().gauge("process.tuples.read", 1, eventsMetricsTag);
+        return inputDecoder.apply(source);
+      }
+    };
+  }
+
+
+  private SchemaCache createSchemaCache(Program program) throws Exception {
     ImmutableSet.Builder<Schema> schemas = ImmutableSet.builder();
 
     for (FlowSpecification flowSpec : program.getSpecification().getFlows().values()) {
@@ -525,11 +593,48 @@ public final class FlowletProgramRunner implements ProgramRunner {
       }
     }
 
+    // Temp fix for ENG-3949. Always add old stream event schema.
+    // TODO: Remove it later. The right thing to do is to have schemas history being stored to support schema
+    // evolution. By design, as long as the schema cache is populated with old schema, the type projection logic
+    // in the decoder would handle it correctly.
+    schemas.add(schemaGenerator.generate(StreamEventData.class));
+
+
     return new SchemaCache(schemas.build(), program.getMainClass().getClassLoader());
   }
 
+  /**
+   * Create a initializer to be executed during the flowlet driver initialization.
+   */
+  private Service createServiceHook(String flowletName, Iterable<ConsumerSupplier<?>> consumerSuppliers,
+                                    AtomicReference<FlowletProgramController> controller) {
+    final List<String> streams = Lists.newArrayList();
+    for (ConsumerSupplier<?> consumerSupplier : consumerSuppliers) {
+      QueueName queueName = consumerSupplier.getQueueName();
+      if (queueName.isStream()) {
+        streams.add(queueName.getSimpleName());
+      }
+    }
+
+    // If no stream, returns a no-op Service
+    if (streams.isEmpty()) {
+      return new AbstractService() {
+        @Override
+        protected void doStart() {
+          notifyStarted();
+        }
+
+        @Override
+        protected void doStop() {
+          notifyStopped();
+        }
+      };
+    }
+    return new FlowletServiceHook(flowletName, streamCoordinator, streams, controller);
+  }
+
   private static interface ProcessMethodFactory {
-    ProcessMethod create(Method method, int maxRetries);
+    <T> ProcessMethod<T> create(Method method, int maxRetries);
   }
 
   private static interface ProcessSpecificationFactory {
@@ -538,7 +643,100 @@ public final class FlowletProgramRunner implements ProgramRunner {
      * no input is available for the given method.
      */
     <T> ProcessSpecification create(Set<String> inputNames, Schema schema, TypeToken<T> dataType,
-                                    ProcessMethod method, ConsumerConfig consumerConfig, int batchSize,
+                                    ProcessMethod<T> method, ConsumerConfig consumerConfig, int batchSize,
                                     Tick tickAnnotation);
+  }
+
+  /**
+   * This service is for start/stop listening to changes in stream property, through the help of
+   * {@link StreamCoordinator}, so that it can react to changes and properly reconfigure stream consumers used by
+   * the flowlet. This hook is provided to {@link FlowletProcessDriver} and being start/stop
+   * when the driver start/stop.
+   */
+  private static final class FlowletServiceHook extends AbstractService {
+
+    private final StreamCoordinator streamCoordinator;
+    private final List<String> streams;
+    private final AtomicReference<FlowletProgramController> controller;
+    private final Executor executor;
+    private final Lock suspendLock = new ReentrantLock();
+    private final StreamPropertyListener propertyListener;
+    private Cancellable cancellable;
+
+    private FlowletServiceHook(final String flowletName, StreamCoordinator streamCoordinator, List<String> streams,
+                               AtomicReference<FlowletProgramController> controller) {
+      this.streamCoordinator = streamCoordinator;
+      this.streams = streams;
+      this.controller = controller;
+      this.executor = ExecutorUtils.newThreadExecutor(Threads.createDaemonThreadFactory("flowlet-stream-update-%d"));
+      this.propertyListener = new StreamPropertyListener() {
+        @Override
+        public void ttlChanged(String streamName, long ttl) {
+          LOG.debug("TTL for stream '{}' changed to {} for flowlet '{}'", streamName, ttl, flowletName);
+          suspendAndResume();
+        }
+
+        @Override
+        public void ttlDeleted(String streamName) {
+          LOG.debug("TTL for stream '{}' deleted for flowlet '{}'", streamName, flowletName);
+          suspendAndResume();
+        }
+
+        @Override
+        public void generationChanged(String streamName, int generation) {
+          LOG.debug("Generation for stream '{}' changed to {} for flowlet '{}'", streamName, generation, flowletName);
+          suspendAndResume();
+        }
+
+        @Override
+        public void generationDeleted(String streamName) {
+          LOG.debug("Generation for stream '{}' deleted for flowlet '{}'", streamName, flowletName);
+          suspendAndResume();
+        }
+      };
+    }
+
+    @Override
+    protected void doStart() {
+      final List<Cancellable> cancellables = Lists.newArrayList();
+      this.cancellable = new Cancellable() {
+        @Override
+        public void cancel() {
+          for (Cancellable c : cancellables) {
+            c.cancel();
+          }
+        }
+      };
+
+      for (String stream : streams) {
+        cancellables.add(streamCoordinator.addListener(stream, propertyListener));
+      }
+      notifyStarted();
+    }
+
+    @Override
+    protected void doStop() {
+      if (cancellable != null) {
+        cancellable.cancel();
+      }
+      notifyStopped();
+    }
+
+    private void suspendAndResume() {
+      executor.execute(new Runnable() {
+        @Override
+        public void run() {
+          suspendLock.lock();
+          try {
+            controller.get().suspend().get();
+            controller.get().resume().get();
+          } catch (Exception e) {
+            LOG.error("Failed to suspend and resume flowlet.", e);
+          } finally {
+            suspendLock.unlock();
+          }
+        }
+      });
+    }
   }
 }

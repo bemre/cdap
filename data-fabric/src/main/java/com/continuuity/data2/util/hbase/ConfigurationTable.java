@@ -62,7 +62,8 @@ public class ConfigurationTable {
     try {
       HTableDescriptor htd = new HTableDescriptor(tableBytes);
       htd.addFamily(new HColumnDescriptor(FAMILY));
-      HBaseTableUtil.createTableIfNotExists(admin, tableName, htd);
+      HBaseTableUtil tableUtil = new HBaseTableUtilFactory().get();
+      tableUtil.createTableIfNotExists(admin, tableName, htd);
 
       long now = System.currentTimeMillis();
       long previous = now - 1;
@@ -128,7 +129,7 @@ public class ConfigurationTable {
       LOG.info("Read " + propertyCnt + " properties from configuration table = " +
                  tableName + ", row = " + type.name());
     } catch (TableNotFoundException e) {
-      // it's expected that this may occur when tables are created before OpexServiceMain has started
+      // it's expected that this may occur when tables are created before ReactorServiceMain has started
       LOG.warn("Configuration table " + tableName + " does not yet exist.");
     } finally {
       if (table != null) {

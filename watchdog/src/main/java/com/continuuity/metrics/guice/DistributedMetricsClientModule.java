@@ -3,13 +3,12 @@
  */
 package com.continuuity.metrics.guice;
 
-import com.continuuity.common.metrics.MetricsCollectionService;
 import com.continuuity.common.conf.CConfiguration;
+import com.continuuity.common.metrics.MetricsCollectionService;
 import com.continuuity.internal.io.DatumWriter;
 import com.continuuity.internal.io.DatumWriterFactory;
 import com.continuuity.internal.io.SchemaGenerator;
 import com.continuuity.internal.io.UnsupportedTypeException;
-import com.continuuity.kafka.client.KafkaClientService;
 import com.continuuity.metrics.MetricsConstants;
 import com.continuuity.metrics.collect.KafkaMetricsCollectionService;
 import com.continuuity.metrics.transport.MetricsRecord;
@@ -22,14 +21,10 @@ import com.google.inject.name.Named;
 
 /**
  * Guice module for binding classes for metrics client in distributed runtime mode.
+ * Requires binding from {@link com.continuuity.common.guice.KafkaClientModule} and
+ * {@link com.continuuity.common.guice.IOModule}.
  */
 public final class DistributedMetricsClientModule extends PrivateModule {
-
-  private final KafkaClientService kafkaClient;
-
-  DistributedMetricsClientModule(KafkaClientService kafkaClient) {
-    this.kafkaClient = kafkaClient;
-  }
 
   @Override
   protected void configure() {
@@ -41,11 +36,6 @@ public final class DistributedMetricsClientModule extends PrivateModule {
   @Named(MetricsConstants.ConfigKeys.KAFKA_TOPIC_PREFIX)
   public String providesKafkaTopicPrefix(CConfiguration cConf) {
     return cConf.get(MetricsConstants.ConfigKeys.KAFKA_TOPIC_PREFIX, MetricsConstants.DEFAULT_KAFKA_TOPIC_PREFIX);
-  }
-
-  @Provides
-  public KafkaClientService providesKafkaClient() {
-    return kafkaClient;
   }
 
   @Provides

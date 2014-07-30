@@ -3,18 +3,18 @@
  */
 package com.continuuity.metrics.collect;
 
-import com.continuuity.data2.OperationException;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.metrics.MetricsScope;
+import com.continuuity.data2.OperationException;
 import com.continuuity.metrics.MetricsConstants;
 import com.continuuity.metrics.data.MetricsTableFactory;
 import com.continuuity.metrics.data.TimeSeriesTable;
 import com.continuuity.metrics.process.MetricsProcessor;
 import com.continuuity.metrics.transport.MetricsRecord;
-import com.continuuity.weave.common.Threads;
 import com.google.common.collect.ImmutableList;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
+import org.apache.twill.common.Threads;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

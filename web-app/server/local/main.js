@@ -5,9 +5,14 @@
 var util = require("util"),
   fs = require('fs'),
   xml2js = require('xml2js'),
-  sys = require('sys');
+  sys = require('sys'),
+  argv = require('optimist').argv,
+  nock = require('nock');
 
 var WebAppServer = require('../common/server');
+
+// Default port for the Dashboard.
+var DEFAULT_BIND_PORT = 9999;
 
 /**
  * Set environment.
@@ -74,10 +79,25 @@ DevServer.prototype.start = function() {
     this.setEnvironment('local', 'Development Kit', version, function () {
 
       this.bindRoutes();
+
+      if (!('dashboard.bind.port' in this.config)) {
+        this.config['dashboard.bind.port'] = DEFAULT_BIND_PORT;
+      }
+
       this.server.listen(this.config['dashboard.bind.port']);
 
       this.logger.info('Listening on port', this.config['dashboard.bind.port']);
       this.logger.info(this.config);
+
+      /**
+       * If mocks are enabled, use mock injector to simulate some responses.
+       */
+      var enableMocks = !!(argv.enableMocks === 'true');
+      if (enableMocks) {
+        this.logger.info('Webapp running with mocks enabled.');
+        HttpMockInjector = require('../../test/httpMockInjector');
+        new HttpMockInjector(nock, this.config['gateway.server.address'], this.config['gateway.server.port']);
+      }
 
     }.bind(this));
 

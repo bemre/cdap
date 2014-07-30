@@ -4,54 +4,70 @@
 
 package com.continuuity.internal.app.services;
 
-import com.continuuity.app.services.AppFabricService;
+import com.continuuity.app.runtime.ProgramRuntimeService;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.conf.Constants;
+import com.continuuity.common.hooks.MetricsReporterHook;
+import com.continuuity.common.logging.LoggingContextAccessor;
+import com.continuuity.common.logging.ServiceLoggingContext;
+import com.continuuity.common.metrics.MetricsCollectionService;
+import com.continuuity.http.HttpHandler;
+import com.continuuity.http.NettyHttpService;
 import com.continuuity.internal.app.runtime.schedule.SchedulerService;
-import com.continuuity.weave.common.Threads;
-import com.continuuity.weave.discovery.Discoverable;
-import com.continuuity.weave.discovery.DiscoveryService;
-import com.google.common.util.concurrent.AbstractExecutionThreadService;
+import com.continuuity.logging.appender.LogAppenderInitializer;
+import com.google.common.collect.ImmutableList;
+import com.google.common.util.concurrent.AbstractIdleService;
 import com.google.inject.Inject;
 import com.google.inject.name.Named;
-import org.apache.thrift.server.TThreadedSelectorServer;
-import org.apache.thrift.transport.TNonblockingServerSocket;
+import org.apache.twill.common.Cancellable;
+import org.apache.twill.common.ServiceListenerAdapter;
+import org.apache.twill.common.Threads;
+import org.apache.twill.discovery.Discoverable;
+import org.apache.twill.discovery.DiscoveryService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.Set;
+import javax.annotation.Nullable;
 
 /**
- * AppFabric Server that implements {@link AbstractExecutionThreadService}.
+ * AppFabric Server.
  */
-public class AppFabricServer extends AbstractExecutionThreadService {
-  private static final int THREAD_COUNT = 2;
+public final class AppFabricServer extends AbstractIdleService {
 
-  private final AppFabricService.Iface service;
-  private final int port;
+  private static final Logger LOG = LoggerFactory.getLogger(AppFabricServer.class);
+
   private final DiscoveryService discoveryService;
   private final InetAddress hostname;
   private final SchedulerService schedulerService;
+  private final ProgramRuntimeService programRuntimeService;
 
-  private TThreadedSelectorServer server;
-  private ExecutorService executor;
-  private static final Logger LOG = LoggerFactory.getLogger(AppFabricServer.class);
+  private NettyHttpService httpService;
+  private Set<HttpHandler> handlers;
+  private MetricsCollectionService metricsCollectionService;
+  private CConfiguration configuration;
+  private LogAppenderInitializer logAppenderInitializer;
+
   /**
    * Construct the AppFabricServer with service factory and configuration coming from guice injection.
    */
   @Inject
-  public AppFabricServer(AppFabricServiceFactory serviceFactory, CConfiguration configuration,
-                         DiscoveryService discoveryService, SchedulerService schedulerService,
-                         @Named(Constants.AppFabric.SERVER_ADDRESS) InetAddress hostname) {
+  public AppFabricServer(CConfiguration configuration, DiscoveryService discoveryService,
+                         SchedulerService schedulerService,
+                         @Named(Constants.AppFabric.SERVER_ADDRESS) InetAddress hostname,
+                         @Named("appfabric.http.handler") Set<HttpHandler> handlers,
+                         @Nullable MetricsCollectionService metricsCollectionService,
+                         ProgramRuntimeService programRuntimeService, LogAppenderInitializer logAppenderInitializer) {
     this.hostname = hostname;
     this.discoveryService = discoveryService;
     this.schedulerService = schedulerService;
-    this.service = serviceFactory.create(schedulerService);
-    this.port = configuration.getInt(Constants.AppFabric.SERVER_PORT,
-                                     Constants.AppFabric.DEFAULT_SERVER_PORT);
+    this.handlers = handlers;
+    this.configuration = configuration;
+    this.metricsCollectionService = metricsCollectionService;
+    this.programRuntimeService = programRuntimeService;
+    this.logAppenderInitializer = logAppenderInitializer;
   }
 
   /**
@@ -59,58 +75,79 @@ public class AppFabricServer extends AbstractExecutionThreadService {
    */
   @Override
   protected void startUp() throws Exception {
-
-    executor = Executors.newFixedThreadPool(THREAD_COUNT, Threads.createDaemonThreadFactory("app-fabric-server-%d"));
+    logAppenderInitializer.initialize();
+    LoggingContextAccessor.setLoggingContext(new ServiceLoggingContext(Constants.Logging.SYSTEM_NAME,
+                                                                       Constants.Logging.COMPONENT_NAME,
+                                                                       Constants.Service.APP_FABRIC_HTTP));
     schedulerService.start();
-    // Register with discovery service.
-    InetSocketAddress socketAddress = new InetSocketAddress(hostname, port);
-    InetAddress address = socketAddress.getAddress();
-    if (address.isAnyLocalAddress()) {
-      address = InetAddress.getLocalHost();
-    }
-    final InetSocketAddress finalSocketAddress = new InetSocketAddress(address, port);
+    programRuntimeService.start();
 
-    discoveryService.register(new Discoverable() {
+    // Run http service on random port
+    httpService = NettyHttpService.builder()
+      .setHost(hostname.getCanonicalHostName())
+      .setHandlerHooks(ImmutableList.of(new MetricsReporterHook(metricsCollectionService,
+                                                                Constants.Service.APP_FABRIC_HTTP)))
+      .addHttpHandlers(handlers)
+      .setConnectionBacklog(configuration.getInt(Constants.Gateway.BACKLOG_CONNECTIONS,
+                                                 Constants.Gateway.DEFAULT_BACKLOG))
+      .setExecThreadPoolSize(configuration.getInt(Constants.Gateway.EXEC_THREADS,
+                                                  Constants.Gateway.DEFAULT_EXEC_THREADS))
+      .setBossThreadPoolSize(configuration.getInt(Constants.Gateway.BOSS_THREADS,
+                                                  Constants.Gateway.DEFAULT_BOSS_THREADS))
+      .setWorkerThreadPoolSize(configuration.getInt(Constants.Gateway.WORKER_THREADS,
+                                                    Constants.Gateway.DEFAULT_WORKER_THREADS))
+      .build();
+
+    // Add a listener so that when the service started, register with service discovery.
+    // Remove from service discovery when it is stopped.
+    httpService.addListener(new ServiceListenerAdapter() {
+
+      private Cancellable cancellable;
+
       @Override
-      public String getName() {
-        return Constants.Service.APP_FABRIC;
+      public void running() {
+        final InetSocketAddress socketAddress = httpService.getBindAddress();
+        LOG.info("AppFabric HTTP Service started at {}", socketAddress);
+
+        // When it is running, register it with service discovery
+        cancellable = discoveryService.register(new Discoverable() {
+
+          @Override
+          public String getName() {
+            return Constants.Service.APP_FABRIC_HTTP;
+          }
+
+          @Override
+          public InetSocketAddress getSocketAddress() {
+            return socketAddress;
+          }
+        });
       }
 
       @Override
-      public InetSocketAddress getSocketAddress() {
-        return finalSocketAddress;
+      public void terminated(State from) {
+        LOG.info("AppFabric HTTP service stopped.");
+        if (cancellable != null) {
+          cancellable.cancel();
+        }
       }
-    });
 
-    TThreadedSelectorServer.Args options = new TThreadedSelectorServer.Args(new TNonblockingServerSocket(socketAddress))
-      .executorService(executor)
-      .processor(new AppFabricService.Processor<AppFabricService.Iface>(service))
-      .workerThreads(THREAD_COUNT);
-    options.maxReadBufferBytes = Constants.Thrift.DEFAULT_MAX_READ_BUFFER;
-    server = new TThreadedSelectorServer(options);
+      @Override
+      public void failed(State from, Throwable failure) {
+        LOG.info("AppFabric HTTP service stopped with failure.", failure);
+        if (cancellable != null) {
+          cancellable.cancel();
+        }
+      }
+    }, Threads.SAME_THREAD_EXECUTOR);
+
+    httpService.startAndWait();
   }
 
-  /**
-   * Runs the AppFabricServer.
-   * <p>
-   *   It's run on a different thread.
-   * </p>
-   */
   @Override
-  protected void run() throws Exception {
-    server.serve();
-  }
-
-  /**
-   * Invoked during shutdown of the thread.
-   */
-  protected void triggerShutdown() {
+  protected void shutDown() throws Exception {
+    httpService.stopAndWait();
+    programRuntimeService.stopAndWait();
     schedulerService.stopAndWait();
-    executor.shutdownNow();
-    server.stop();
-  }
-
-  public AppFabricService.Iface getService() {
-    return service;
   }
 }

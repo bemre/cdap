@@ -10,6 +10,9 @@ import org.apache.hadoop.mapreduce.TaskAttemptContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
+import javax.annotation.Nullable;
+
 /**
  * Provides access to MapReduceContext for mapreduce job tasks.
  */
@@ -34,12 +37,16 @@ public final class MapReduceContextProvider {
     this.contextBuilder = null;
   }
 
+  /**
+   * Creates an instance of {@link BasicMapReduceContext} that the {@link com.continuuity.app.program.Program} contained
+   * inside cannot load program classes. It is used for the cases where only the application specification is needed,
+   * but no need to load any class from it.
+   */
   public synchronized BasicMapReduceContext get() {
     if (context == null) {
       CConfiguration conf = contextConfig.getConf();
       context = getBuilder(conf)
-        .build(conf,
-               type,
+        .build(type,
                contextConfig.getRunId(),
                contextConfig.getLogicalStartTime(),
                contextConfig.getWorkflowBatch(),

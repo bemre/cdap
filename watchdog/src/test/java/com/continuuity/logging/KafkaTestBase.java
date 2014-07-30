@@ -1,10 +1,9 @@
 package com.continuuity.logging;
 
-import com.continuuity.metrics.collect.KafkaMetricsCollectionServiceTest;
-import com.continuuity.weave.internal.kafka.EmbeddedKafkaServer;
-import com.continuuity.weave.internal.utils.Networks;
-import com.continuuity.weave.internal.zookeeper.InMemoryZKServer;
 import com.google.common.base.Preconditions;
+import org.apache.twill.internal.kafka.EmbeddedKafkaServer;
+import org.apache.twill.internal.utils.Networks;
+import org.apache.twill.internal.zookeeper.InMemoryZKServer;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.ClassRule;
@@ -34,7 +33,7 @@ public abstract class KafkaTestBase {
     zkServer.startAndWait();
 
     Properties kafkaConfig = generateKafkaConfig();
-    kafkaServer = new EmbeddedKafkaServer(KafkaMetricsCollectionServiceTest.class.getClassLoader(), kafkaConfig);
+    kafkaServer = new EmbeddedKafkaServer(kafkaConfig);
     kafkaServer.startAndWait();
     kafkaPort = Integer.valueOf(kafkaConfig.getProperty("port"));
 
@@ -68,7 +67,7 @@ public abstract class KafkaTestBase {
     prop.setProperty("socket.receive.buffer.bytes", "1048576");
     prop.setProperty("socket.request.max.bytes", "104857600");
     prop.setProperty("log.dir", tmpFolder.newFolder().getAbsolutePath());
-    prop.setProperty("num.partitions", "10");
+    prop.setProperty("num.partitions", "2");
     prop.setProperty("log.flush.interval.messages", "10000");
     prop.setProperty("log.flush.interval.ms", "1000");
     prop.setProperty("log.retention.hours", "1");

@@ -7,7 +7,6 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Ordering;
 import com.google.common.primitives.Longs;
 
-import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
@@ -15,6 +14,7 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.concurrent.ConcurrentNavigableMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+import javax.annotation.Nullable;
 
 /**
  *
@@ -29,9 +29,10 @@ public class InMemoryOcTableService {
   }
 
   public static synchronized void create(String tableName) {
-    tables
-      .put(tableName,
-           new ConcurrentSkipListMap<byte[], NavigableMap<byte[], NavigableMap<Long, byte[]>>>(Bytes.BYTES_COMPARATOR));
+    if (!tables.containsKey(tableName)) {
+      tables.put(tableName, new ConcurrentSkipListMap<byte[],
+        NavigableMap<byte[], NavigableMap<Long, byte[]>>>(Bytes.BYTES_COMPARATOR));
+    }
   }
 
   public static synchronized void truncate(String tableName) {

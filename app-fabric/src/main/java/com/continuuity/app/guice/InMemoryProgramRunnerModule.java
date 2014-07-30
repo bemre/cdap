@@ -4,30 +4,28 @@
 
 package com.continuuity.app.guice;
 
-import com.continuuity.app.queue.QueueReader;
 import com.continuuity.app.runtime.ProgramRunner;
 import com.continuuity.app.runtime.ProgramRuntimeService;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.conf.Constants;
-import com.continuuity.common.http.core.HttpHandler;
 import com.continuuity.common.logging.common.LocalLogWriter;
 import com.continuuity.common.logging.common.LogWriter;
 import com.continuuity.internal.app.queue.QueueReaderFactory;
-import com.continuuity.internal.app.queue.SingleQueue2Reader;
 import com.continuuity.internal.app.runtime.ProgramRunnerFactory;
+import com.continuuity.internal.app.runtime.ProgramServiceDiscovery;
 import com.continuuity.internal.app.runtime.batch.MapReduceProgramRunner;
 import com.continuuity.internal.app.runtime.flow.FlowProgramRunner;
 import com.continuuity.internal.app.runtime.flow.FlowletProgramRunner;
 import com.continuuity.internal.app.runtime.procedure.ProcedureProgramRunner;
 import com.continuuity.internal.app.runtime.service.InMemoryProgramRuntimeService;
+import com.continuuity.internal.app.runtime.service.InMemoryProgramServiceDiscovery;
+import com.continuuity.internal.app.runtime.service.InMemoryRunnableRunner;
+import com.continuuity.internal.app.runtime.service.InMemoryServiceRunner;
 import com.continuuity.internal.app.runtime.webapp.IntactJarHttpHandler;
+import com.continuuity.internal.app.runtime.webapp.JarHttpHandler;
 import com.continuuity.internal.app.runtime.webapp.WebappHttpHandlerFactory;
 import com.continuuity.internal.app.runtime.webapp.WebappProgramRunner;
 import com.continuuity.internal.app.runtime.workflow.WorkflowProgramRunner;
-import com.continuuity.weave.api.ServiceAnnouncer;
-import com.continuuity.weave.common.Cancellable;
-import com.continuuity.weave.discovery.Discoverable;
-import com.continuuity.weave.discovery.DiscoveryService;
 import com.google.common.base.Preconditions;
 import com.google.inject.Inject;
 import com.google.inject.PrivateModule;
@@ -38,6 +36,10 @@ import com.google.inject.Singleton;
 import com.google.inject.assistedinject.FactoryModuleBuilder;
 import com.google.inject.multibindings.MapBinder;
 import com.google.inject.name.Named;
+import org.apache.twill.api.ServiceAnnouncer;
+import org.apache.twill.common.Cancellable;
+import org.apache.twill.discovery.Discoverable;
+import org.apache.twill.discovery.DiscoveryService;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -61,6 +63,9 @@ final class InMemoryProgramRunnerModule extends PrivateModule {
     // Bind ServiceAnnouncer for procedure.
     bind(ServiceAnnouncer.class).to(DiscoveryServiceAnnouncer.class);
 
+    // For Binding queue stuff
+    bind(QueueReaderFactory.class).in(Scopes.SINGLETON);
+
     // Bind ProgramRunner
     MapBinder<ProgramRunnerFactory.Type, ProgramRunner> runnerFactoryBinder =
       MapBinder.newMapBinder(binder(), ProgramRunnerFactory.Type.class, ProgramRunner.class);
@@ -70,6 +75,10 @@ final class InMemoryProgramRunnerModule extends PrivateModule {
     runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.MAPREDUCE).to(MapReduceProgramRunner.class);
     runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.WORKFLOW).to(WorkflowProgramRunner.class);
     runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.WEBAPP).to(WebappProgramRunner.class);
+
+    //twill support in singlenode
+    runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.SERVICE).to(InMemoryServiceRunner.class);
+    runnerFactoryBinder.addBinding(ProgramRunnerFactory.Type.RUNNABLE).to(InMemoryRunnableRunner.class);
 
     bind(ProgramRunnerFactory.class).to(InMemoryFlowProgramRunnerFactory.class).in(Scopes.SINGLETON);
     // Note: Expose for test cases. Need to refactor test cases.
@@ -82,13 +91,12 @@ final class InMemoryProgramRunnerModule extends PrivateModule {
     // For binding DataSet transaction stuff
     install(new DataFabricFacadeModule());
 
-    // For Binding queue stuff
-    install(new FactoryModuleBuilder()
-            .implement(QueueReader.class, SingleQueue2Reader.class)
-            .build(QueueReaderFactory.class));
+    //install discovery service modules
+    bind(ProgramServiceDiscovery.class).to(InMemoryProgramServiceDiscovery.class).in(Scopes.SINGLETON);
+    expose(ProgramServiceDiscovery.class);
 
     // Create webapp http handler factory.
-    install(new FactoryModuleBuilder().implement(HttpHandler.class, IntactJarHttpHandler.class)
+    install(new FactoryModuleBuilder().implement(JarHttpHandler.class, IntactJarHttpHandler.class)
               .build(WebappHttpHandlerFactory.class));
   }
 

@@ -10,9 +10,7 @@ import com.continuuity.data2.queue.Queue2Producer;
 import com.continuuity.data2.queue.QueueClientFactory;
 import com.continuuity.data2.transaction.queue.QueueAdmin;
 import com.continuuity.data2.transaction.queue.QueueMetrics;
-import com.continuuity.data2.transaction.queue.StreamAdmin;
 import com.google.inject.Inject;
-import com.google.inject.name.Named;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.client.HTable;
 
@@ -29,13 +27,15 @@ public final class HBaseQueueClientFactory implements QueueClientFactory {
   private final Configuration hConf;
   private final HBaseQueueAdmin queueAdmin;
   private final HBaseStreamAdmin streamAdmin;
+  private final HBaseQueueUtil queueUtil;
 
   @Inject
-  public HBaseQueueClientFactory(@Named("HBaseOVCTableHandleHConfig") Configuration hConf,
-                                 QueueAdmin queueAdmin, StreamAdmin streamAdmin) {
+  public HBaseQueueClientFactory(Configuration hConf,
+                                 QueueAdmin queueAdmin, HBaseStreamAdmin streamAdmin) {
     this.hConf = hConf;
     this.queueAdmin = (HBaseQueueAdmin) queueAdmin;
-    this.streamAdmin = (HBaseStreamAdmin) streamAdmin;
+    this.streamAdmin = streamAdmin;
+    this.queueUtil = new HBaseQueueUtilFactory().get();
   }
 
   // for testing only
@@ -54,8 +54,8 @@ public final class HBaseQueueClientFactory implements QueueClientFactory {
     HBaseQueueAdmin admin = ensureTableExists(queueName);
     HBaseConsumerStateStore stateStore = new HBaseConsumerStateStore(queueName, consumerConfig,
                                                                      createHTable(admin.getConfigTableName()));
-    return new HBaseQueue2Consumer(consumerConfig, createHTable(admin.getActualTableName(queueName)),
-                                   queueName, stateStore.getState(), stateStore);
+    return queueUtil.getQueueConsumer(consumerConfig, createHTable(admin.getActualTableName(queueName)),
+                                      queueName, stateStore.getState(), stateStore);
   }
 
   @Override

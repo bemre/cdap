@@ -1,14 +1,14 @@
 package com.continuuity.data;
 
 import com.continuuity.data2.dataset.api.DataSetManager;
-import com.continuuity.weave.filesystem.Location;
-import com.continuuity.weave.filesystem.LocationFactory;
 import com.google.common.base.Throwables;
+import org.apache.twill.filesystem.Location;
+import org.apache.twill.filesystem.LocationFactory;
 
-import javax.annotation.Nullable;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Properties;
+import javax.annotation.Nullable;
 
 /**
  * Simple implementation of the DataFabric interface.

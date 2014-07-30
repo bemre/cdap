@@ -44,14 +44,23 @@ task ('prepackager', dependsOn : ['build']) {
     copy {
       from configurations.runtime
       from configurations.archives.allArtifacts.files
-      from jar.outputs.files
       exclude '**/*source*.jar', '**/*integration.jar', '**/*javadoc.jar'
-      // Important: excluding all hadoop, hbase and protobuf libraries in favor of continuuity-hadoop-libs-* packages
+      // Important: excluding all hadoop, hbase, protobuf and hive libraries in favor of continuuity-hadoop-libs-*
+      // packages
       exclude '**/hadoop-*.jar'
       exclude '**/hbase-*.jar'
       exclude '**/protobuf-java-*.jar'
+      exclude '**/hive-*.jar'
+      exclude '**/datanucleus-*.jar'  // used by Hive
       into "${installDir}/lib"
     }
+
+    // separating out from above to prevent exclude patterns matching
+    copy {
+      from jar.outputs.files
+      into "${installDir}/lib"
+    }
+
     copy {
       from "$rootProject.projectDir/distributions/src/LICENSE-2.0.txt"
       into "${installDir}"
@@ -167,8 +176,7 @@ def getVersionIteration = {
 packaging {
   baseDir = "$project.buildDir/stage-packaging"
   dependencies = [
-                   'continuuity',
-                   'continuuity-hadoop-libs'
+                   'continuuity'
                  ]
   extraOptions = [
                    '--name': "continuuity-$componentName",
@@ -196,8 +204,7 @@ packaging {
 rpm {
   baseDir = "$project.buildDir/stage-packaging"
   dependencies = [
-                   'continuuity',
-                   'continuuity-hadoop-libs'
+                   'continuuity'
                  ]
 
 }

@@ -18,7 +18,7 @@ define(['core/models/element'], function (Element) {
 				this.set('id', this.get('name'));
 			}
 
-			this.trackMetric('/reactor/datasets/{id}/store.bytes', 'aggregates', 'storage');
+			this.trackMetric('/reactor/datasets/{id}/dataset.store.bytes', 'aggregates', 'storage');
 
 		},
 
@@ -36,7 +36,7 @@ define(['core/models/element'], function (Element) {
 		find: function (dataset_id, http) {
 			var promise = Ember.Deferred.create();
 
-			http.rest('datasets', dataset_id, {cache: true}, function (model, error) {
+			http.rest('datasets', dataset_id, function (model, error) {
 
 				model = C.Dataset.create(model);
 				promise.resolve(model);

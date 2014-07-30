@@ -1,13 +1,10 @@
 package com.continuuity.metrics.data;
 
-import com.continuuity.metrics.collect.AggregatedMetricsCollectionService;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.PeekingIterator;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.Collection;
 import java.util.Iterator;
@@ -51,7 +48,6 @@ import java.util.List;
  *   1   6   8   8   6   6   8   9
  */
 public class TimeValueInterpolatedAggregator implements Iterable<TimeValue> {
-  private static final Logger LOG = LoggerFactory.getLogger(TimeValueInterpolatedAggregator.class);
 
   private final Collection<? extends Iterable<TimeValue>> allTimeseries;
   private final Interpolator interpolator;
@@ -151,7 +147,7 @@ public class TimeValueInterpolatedAggregator implements Iterable<TimeValue> {
     PeekingIterator<TimeValue> iter;
     TimeValue lastValue;
 
-    public BiDirectionalPeekingIterator(PeekingIterator iter) {
+    public BiDirectionalPeekingIterator(PeekingIterator<TimeValue> iter) {
       this.iter = iter;
       this.lastValue = null;
     }

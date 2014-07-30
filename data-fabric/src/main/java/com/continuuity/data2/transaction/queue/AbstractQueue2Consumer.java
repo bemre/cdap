@@ -28,6 +28,7 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Set;
 import java.util.SortedMap;
 
@@ -35,6 +36,8 @@ import java.util.SortedMap;
  * Common queue consumer for persisting engines such as HBase and LevelDB.
  */
 public abstract class AbstractQueue2Consumer implements Queue2Consumer, TransactionAware, Closeable {
+
+  private static final DequeueResult<byte[]> EMPTY_RESULT = DequeueResult.Empty.result();
 
   // TODO: Make these configurable.
   // Minimum number of rows to fetch per scan.
@@ -54,10 +57,11 @@ public abstract class AbstractQueue2Consumer implements Queue2Consumer, Transact
   private final ConsumerConfig consumerConfig;
   private final QueueName queueName;
   private final SortedMap<byte[], SimpleQueueEntry> entryCache;
-  private final SortedMap<byte[], SimpleQueueEntry> consumingEntries;
+  private final NavigableMap<byte[], SimpleQueueEntry> consumingEntries;
   protected final byte[] stateColumnName;
   private final byte[] queueRowPrefix;
   protected byte[] startRow;
+  private byte[] scanStartRow;
   protected Transaction transaction;
   private boolean committed;
   protected int commitCount;
@@ -91,12 +95,12 @@ public abstract class AbstractQueue2Consumer implements Queue2Consumer, Transact
   }
 
   @Override
-  public DequeueResult dequeue() throws IOException {
+  public DequeueResult<byte[]> dequeue() throws IOException {
     return dequeue(1);
   }
 
   @Override
-  public DequeueResult dequeue(int maxBatchSize) throws IOException {
+  public DequeueResult<byte[]> dequeue(int maxBatchSize) throws IOException {
     Preconditions.checkArgument(maxBatchSize > 0, "Batch size must be > 0.");
 
     // pre-compute the "claimed" state content in case of FIFO.
@@ -131,7 +135,7 @@ public abstract class AbstractQueue2Consumer implements Queue2Consumer, Transact
 
     // If nothing get dequeued, return the empty result.
     if (consumingEntries.isEmpty()) {
-      return DequeueResult.EMPTY_RESULT;
+      return EMPTY_RESULT;
     }
 
     return new SimpleDequeueResult(consumingEntries.values());
@@ -165,20 +169,17 @@ public abstract class AbstractQueue2Consumer implements Queue2Consumer, Transact
 
   @Override
   public void postTxCommit() {
-    if (!consumingEntries.isEmpty()) {
-      // Start row can be updated to the largest rowKey in the consumingEntries (now is consumed)
-      // that is smaller than smallest of in progress list
-      long[] inProgress = transaction.getInProgress();
-      if (inProgress.length == 0) {
-        // No need to copy, as after postTxCommit, no one will use the consumingEntries except
-        // next call should be startTx which will clear the consumingEntries.
-        startRow = getNextRow(consumingEntries.lastKey());
-      } else {
-        SortedMap<byte[], SimpleQueueEntry> headMap = consumingEntries.headMap(getRowKey(inProgress[0], 0));
-        // If nothing smaller than the smallest of in progress list, then it can't advance.
-        if (!headMap.isEmpty()) {
-          startRow = getNextRow(headMap.firstKey());
+    if (scanStartRow != null) {
+      if (!consumingEntries.isEmpty()) {
+        // Start row can be updated to the largest rowKey in the consumingEntries (now is consumed)
+        // that is smaller than or equal to scanStartRow
+        byte[] floorKey = consumingEntries.floorKey(scanStartRow);
+        if (floorKey != null) {
+          startRow = floorKey;
         }
+      } else {
+        // If the dequeue has empty result, startRow can advance to scanStartRow
+        startRow = Arrays.copyOf(scanStartRow, scanStartRow.length);
       }
     }
   }
@@ -253,11 +254,16 @@ public abstract class AbstractQueue2Consumer implements Queue2Consumer, Transact
 
     // Scan the table for queue entries.
     int numRows = Math.max(MIN_FETCH_ROWS, maxBatchSize * PREFETCH_BATCHES);
-    QueueScanner scanner = getScanner(startRow,
+    if (scanStartRow == null) {
+      scanStartRow = Arrays.copyOf(startRow, startRow.length);
+    }
+    QueueScanner scanner = getScanner(scanStartRow,
                                       QueueEntryRow.getStopRowForTransaction(queueRowPrefix, transaction),
                                       numRows);
     try {
       // Try fill up the cache
+      boolean firstScannedRow = true;
+
       while (entryCache.size() < numRows) {
         ImmutablePair<byte[], Map<byte[], byte[]>> entry = scanner.next();
         if (entry == null) {
@@ -272,6 +278,13 @@ public abstract class AbstractQueue2Consumer implements Queue2Consumer, Transact
 
         // Row key is queue_name + writePointer + counter
         long writePointer = Bytes.toLong(rowKey, queueRowPrefix.length, Longs.BYTES);
+
+        // If it is first row returned by the scanner and was written before the earliest in progress,
+        // it's safe to advance scanStartRow to current row because nothing can be written before this row.
+        if (firstScannedRow && writePointer < transaction.getFirstInProgress()) {
+          firstScannedRow = false;
+          scanStartRow = Arrays.copyOf(rowKey, rowKey.length);
+        }
 
         // If writes later than the reader pointer, abort the loop, as entries that comes later are all uncommitted.
         // this is probably not needed due to the limit of the scan to the stop row, but to be safe...
@@ -321,7 +334,7 @@ public abstract class AbstractQueue2Consumer implements Queue2Consumer, Transact
       QueueEntryRow.canConsume(consumerConfig, transaction, enqueueWritePointer, counter, metaValue, stateValue);
 
     if (QueueEntryRow.CanConsume.NO_INCLUDING_ALL_OLDER == canConsume) {
-      startRow = getNextRow(startRow, enqueueWritePointer, counter);
+      scanStartRow = getNextRow(scanStartRow, enqueueWritePointer, counter);
       return false;
     }
 
@@ -348,15 +361,6 @@ public abstract class AbstractQueue2Consumer implements Queue2Consumer, Transact
     return row;
   }
 
-  /**
-   * Get the next row based on the given row. It modifies the given row byte[] in place and return sit.
-   */
-  private byte[] getNextRow(byte[] row) {
-    int counterOff = queueRowPrefix.length + Longs.BYTES;
-    Bytes.putInt(row, counterOff, Bytes.toInt(row, counterOff) + 1);
-    return row;
-  }
-
   @Override
   public String getName() {
     return getClass().getSimpleName() + "(queue = " + queueName + ")";
@@ -365,7 +369,7 @@ public abstract class AbstractQueue2Consumer implements Queue2Consumer, Transact
   /**
    * Implementation of dequeue result.
    */
-  private final class SimpleDequeueResult implements DequeueResult {
+  private final class SimpleDequeueResult implements DequeueResult<byte[]> {
 
     private final List<SimpleQueueEntry> entries;
 

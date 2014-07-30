@@ -6,11 +6,11 @@ import com.google.common.collect.Maps;
 import com.google.inject.Inject;
 import com.google.inject.Singleton;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
 import java.io.PrintStream;
 import java.util.List;
 import java.util.concurrent.ConcurrentMap;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 /**
  * Maintains all in-memory queues in the system.

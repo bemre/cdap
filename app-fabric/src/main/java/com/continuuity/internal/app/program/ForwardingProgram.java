@@ -3,11 +3,11 @@
  */
 package com.continuuity.internal.app.program;
 
-import com.continuuity.api.ApplicationSpecification;
+import com.continuuity.app.ApplicationSpecification;
 import com.continuuity.app.Id;
 import com.continuuity.app.program.Program;
 import com.continuuity.app.program.Type;
-import com.continuuity.weave.filesystem.Location;
+import org.apache.twill.filesystem.Location;
 
 /**
  * A delegation of {@link Program} interface.
@@ -18,6 +18,11 @@ public abstract class ForwardingProgram implements Program {
 
   protected ForwardingProgram(Program delegate) {
     this.delegate = delegate;
+  }
+
+  @Override
+  public String getMainClassName() {
+    return delegate.getMainClassName();
   }
 
   @Override

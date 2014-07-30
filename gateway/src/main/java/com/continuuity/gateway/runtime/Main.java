@@ -1,39 +1,32 @@
 package com.continuuity.gateway.runtime;
 
-import com.continuuity.app.store.StoreFactory;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.conf.Constants;
-import com.continuuity.common.conf.KafkaConstants;
 import com.continuuity.common.guice.ConfigModule;
 import com.continuuity.common.guice.DiscoveryRuntimeModule;
 import com.continuuity.common.guice.IOModule;
+import com.continuuity.common.guice.KafkaClientModule;
 import com.continuuity.common.guice.LocationRuntimeModule;
+import com.continuuity.common.guice.ZKClientModule;
 import com.continuuity.common.metrics.MetricsCollectionService;
 import com.continuuity.common.runtime.DaemonMain;
 import com.continuuity.data.runtime.DataFabricModules;
+import com.continuuity.data.runtime.DataSetsModules;
+import com.continuuity.gateway.auth.AuthModule;
 import com.continuuity.gateway.collector.NettyFlumeCollector;
-import com.continuuity.gateway.v2.runtime.GatewayModules;
-import com.continuuity.internal.app.store.MDTBasedStoreFactory;
-import com.continuuity.internal.kafka.client.ZKKafkaClientService;
-import com.continuuity.kafka.client.KafkaClientService;
 import com.continuuity.logging.guice.LoggingModules;
 import com.continuuity.metrics.guice.MetricsClientRuntimeModule;
-import com.continuuity.weave.common.Services;
-import com.continuuity.weave.zookeeper.RetryStrategies;
-import com.continuuity.weave.zookeeper.ZKClientService;
-import com.continuuity.weave.zookeeper.ZKClientServices;
-import com.continuuity.weave.zookeeper.ZKClients;
 import com.google.common.util.concurrent.Futures;
-import com.google.inject.AbstractModule;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hbase.HBaseConfiguration;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
+import org.apache.twill.common.Services;
+import org.apache.twill.kafka.client.KafkaClientService;
+import org.apache.twill.zookeeper.ZKClientService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.concurrent.TimeUnit;
 
 /**
  * Main is a simple class that allows us to launch the Gateway as a standalone
@@ -59,47 +52,35 @@ public class Main extends DaemonMain {
     CConfiguration cConf = CConfiguration.create();
     Configuration hConf = HBaseConfiguration.create(new HdfsConfiguration());
 
+    // Set the HTTP keep alive max connection property to allow more keep-alive connections
+    if (System.getProperty("http.maxConnections") == null) {
+      System.setProperty("http.maxConnections", cConf.get(Constants.Gateway.STREAM_FLUME_THREADS));
+    }
+
     String zookeeper = cConf.get(Constants.Zookeeper.QUORUM);
     if (zookeeper == null) {
       LOG.error("No zookeeper quorum provided.");
       throw new IllegalStateException("No zookeeper quorum provided.");
     }
 
-    zkClientService =
-      ZKClientServices.delegate(
-        ZKClients.reWatchOnExpire(
-          ZKClients.retryOnFailure(
-            ZKClientService.Builder.of(zookeeper).build(),
-            RetryStrategies.exponentialDelay(500, 2000, TimeUnit.MILLISECONDS)
-          )
-        ));
-
-    String kafkaZKNamespace = cConf.get(KafkaConstants.ConfigKeys.ZOOKEEPER_NAMESPACE_CONFIG);
-    kafkaClientService = new ZKKafkaClientService(
-      kafkaZKNamespace == null
-        ? zkClientService
-        : ZKClients.namespace(zkClientService, "/" + kafkaZKNamespace)
-    );
-
     // Set up our Guice injections
     Injector injector = Guice.createInjector(
-      new MetricsClientRuntimeModule(kafkaClientService).getDistributedModules(),
-      new GatewayModules().getDistributedModules(),
-      new DataFabricModules(cConf, hConf).getDistributedModules(),
       new ConfigModule(cConf, hConf),
+      new AuthModule(),
       new IOModule(),
+      new ZKClientModule(),
+      new KafkaClientModule(),
       new LocationRuntimeModule().getDistributedModules(),
-      new DiscoveryRuntimeModule(zkClientService).getDistributedModules(),
-      new LoggingModules().getDistributedModules(),
-      new AbstractModule() {
-        @Override
-        protected void configure() {
-          // It's a bit hacky to add it here. Need to refactor these bindings out as it overlaps with
-          // AppFabricServiceModule
-          bind(StoreFactory.class).to(MDTBasedStoreFactory.class);
-        }
-      }
+      new DiscoveryRuntimeModule().getDistributedModules(),
+      new MetricsClientRuntimeModule().getDistributedModules(),
+      new GatewayModule().getDistributedModules(),
+      new DataFabricModules().getDistributedModules(),
+      new DataSetsModules().getDistributedModule(),
+      new LoggingModules().getDistributedModules()
     );
+
+    zkClientService = injector.getInstance(ZKClientService.class);
+    kafkaClientService = injector.getInstance(KafkaClientService.class);
 
     // Get the metrics collection service
     metricsCollectionService = injector.getInstance(MetricsCollectionService.class);

@@ -30,56 +30,111 @@
   <script type="text/javascript" src="/core/lib/jquery.color-2.1.2.min.js"></script>
   <script type="text/javascript" src="/core/lib/require.js" data-main="main"></script>
 
-
   <script src="/core/lib/rickshaw.js"></script>
   <script src="/third_party/select2/select2.min.js"></script>
 
   <link rel="stylesheet" href="/third_party/rickshaw/rickshaw.min.css">
   <link rel="stylesheet" href="/third_party/bootstrap/css/bootstrap.min.css">
   <link rel="stylesheet" href="/third_party/select2/select2.css">
-  <link rel="stylesheet" href="/assets/css/main.css">
+  <link rel="stylesheet" href="/assets/css/new/main.css">
+
+  <script>(function(){var uv=document.createElement('script');uv.type='text/javascript';uv.async=true;uv.src='//widget.uservoice.com/dFjjpiFcT5p78aYB5bDzGA.js';var s=document.getElementsByTagName('script')[0];s.parentNode.insertBefore(uv,s)})()</script>
 
 </head>
 <body>
- <div id="nav">
-    <a href="#" id="logo"></a>
-    <a href="#" id="product-name"></a>
-    <ul>
-      <li class="overview"><a class="nav-link nav-dash" id="nav-overview" href="#">Overview</a></li>
-      <li><a class="nav-link nav-streams" id="nav-collect" href="#/streams">Collect</a></li>
-      <li><a class="nav-link nav-flows" id="nav-process" href="#/flows">Process</a></li>
-      <li><a class="nav-link nav-datasets" id="nav-store" href="#/datasets">Store</a></li>
-      <li><a class="nav-link nav-queries" id="nav-queries" href="#/procedures">Query</a></li>
-    </ul>
+  <div id="warning">
+    <div>
+      <img src="/assets/img/v2/warning-close.png" id="warning-close" />
+      <span class="warning-text">Experiencing connection issues.</span>
+    </div>
   </div>
 
   <script type="text/x-handlebars" data-template-name="application">
     <div id="header">
+      <div class="logo-holder left-float">
+        <a href="#" id="logo"></a>
+        <a href="#" id="product-name"></a>
+      </div>
       <div id="global">
-      {{#if C.Env.authenticated}}
-        <a href="https://accounts.continuuity.com/logout">Logout</a>
-        <a href="https://accounts.continuuity.com/go-to-uservoice" target="_blank">Support</a>
-        <a href="https://accounts.continuuity.com/profile" class="user-link" target="_blank">{{C.Env.user.name}}</a>
-        <a href="#" class="cloud-link">{{C.Env.cluster.vpc_label}}</a>
-      {{else}}
-        <a href="http://support.continuuity.com/" target="_blank" id="header-support">Support</a>
-        <a href="https://accounts.continuuity.com/" target="_blank" class="user-link" id="header-account">My Account</a>
+      {{#if C.Env.security_enabled}}
+          {{#if C.Env.auth_token}}
+            <a class="general-link logout-link" href="/logout" id="header-logout">Logout</a>
+          {{else}}
+            <a class="general-link login-link" href="/#/login" id="header-login">Login</a>
+          {{/if}}
+          {{#if C.Env.authenticated}}
+            <a class="general-link logout-link" href="https://accounts.continuuity.com/logout">Logout</a>
+            <a href="javascript:void(0)" data-uv-lightbox="classic_widget" data-uv-mode="full" data-uv-primary-color="#cc6d00" data-uv-link-color="#007dbf" data-uv-default-mode="support" data-uv-forum-id="194926" class="support-link">Support</a>
+            <a href="https://accounts.continuuity.com/profile" class="user-link" target="_blank">{{C.Env.user.name}}</a>
+            <a href="#" class="cloud-link">{{C.Env.cluster.vpc_label}}</a>
+          {{else}}
+            {{#unless C.isEnterprise}}
+            <a href="javascript:void(0)" data-uv-lightbox="classic_widget" data-uv-mode="full" data-uv-primary-color="#cc6d00" data-uv-link-color="#007dbf" data-uv-default-mode="support" data-uv-forum-id="194926" class="support-link">Support</a>
+            {{/unless}}
+            <div class="pull-right user-link small-pad" style="position: relative; width: 140px;text-align: center;">
+              <div class="dropdown" data-toggle="dropdown">
+                <div class="text-span">  <img id="loading-time-select-img" src="/assets/img/start-all-load.gif" />My account</div>
+              </div>
+                <ul class="dropdown-menu top-dropdown-listholder" style="text-align: left; margin-top: -5px;">
+                {{#unless C.isEnterprise}}
+                  <li><a href="https://accounts.continuuity.com/profile" target="_blank">Go to Sandbox</a></li>
+                {{/unless}}
+                  <li><a href="/#/accesstoken">Access token</a></li>
+                </ul>
+            </div>
+          {{/if}}
       {{/if}}
+
+      <a href="#/services" class="general-link services-link topmenu-top-padding">Services
+        <span id="failed-services-container">
+          <span id="failed-services"></span>
+        </span>
+      </a>
+
       <a href="#/analyze" class="metrics-link" id="header-metrics">Metrics</a>
       </div>
-      {{view C.Embed.Breadcrumb}}
     </div>
-    <div id="warning"><div>Experiencing connection issues.</div></div>
+    <div id="nav">
+      <ul>
+        <li class="overview"><a class="nav-link nav-dash" id="nav-overview" href="#">
+          <img class="left-nav-icon" src="/assets/img/v2/app_icon.png" />
+          <br />
+          Application
+        </a></li>
+        <li><a class="nav-link nav-flows" id="nav-process" href="#/flows">
+          <img class="left-nav-icon" src="/assets/img/v2/process_icon.png" />
+          <br />
+          Process</a></li>
+        <li><a class="nav-link nav-datasets" id="nav-store" href="#/datasets">
+          <img class="left-nav-icon" src="/assets/img/v2/store_icon.png" />
+          <br />
+          Store</a></li>
+        <li><a class="nav-link nav-queries" id="nav-queries" href="#/procedures">
+          <img class="left-nav-icon" src="/assets/img/v2/query_icon.png" />
+          <br />
+          Query</a></li>
+      </ul>
+    </div>
     <div id="content-body">
-      {{outlet}}
-    </div>
-    <div id="footer" style="clear: both;"><span id="copyright">COPYRIGHT &copy; 2013 CONTINUUITY INC. ALL RIGHTS RESERVED.</span><br />
+      {{!--       <div class="breadcrumbs-container">
+        {{view C.Embed.Breadcrumb}}
+        <div style="clear:both"></div>
+      </div> --}}
 
-    <a href="http://www.continuuity.com/terms-and-privacy" id="footer-terms" target="blank">Terms and Privacy</a>
+      {{outlet}}
+
+    </div>
+    <div id="footer" style="clear: both;"><span id="copyright">COPYRIGHT &copy; 2014 CONTINUUITY INC. ALL RIGHTS RESERVED.</span><br />
+
+    <a href="http://www.continuuity.com/terms" id="footer-terms" target="blank">Terms</a>
+    <span>&nbsp;·&nbsp;</span>
+    <a href="http://www.continuuity.com/privacy" id="footer-terms" target="blank">Privacy</a>
     <span>&nbsp;·&nbsp;</span>
     <a href="http://www.continuuity.com/contact-us" id="footer-contact" target="blank">Contact</a>
+    {{#unless C.isEnterprise}}
     <span>&nbsp;·&nbsp;</span>
-    <a href="http://support.continuuity.com/" id="footer-support" target="blank">Support</a>
+    <a href="javascript:void(0)" data-uv-lightbox="classic_widget" data-uv-mode="full" data-uv-primary-color="#cc6d00" data-uv-link-color="#007dbf" data-uv-default-mode="support" data-uv-forum-id="194926" id="footer-support">Support</a>
+    {{/unless}}
     {{#if C.isLocal}}
     <span>&nbsp;·&nbsp;</span>
     <a style="text-decoration:underline;" id="footer-reset" href="#" onclick="return C.Util.reset();">Reset</a>
@@ -90,6 +145,227 @@
       <div id="drop-border"><div id="drop-loading"></div><div id="drop-label">Drop here to deploy.</div></div>
     </div>
 
+    <div id="nux-completed-modal" class="popup-modal">
+      <div class="popup-container">
+        <div id="nux-1">
+          <div class="popup-body">
+            <h2>And you’re done!</h2>
+
+            <h3>Now you’ve completed:</h3>
+
+            <ol>
+              <li>injecting an Event into a Stream;</li>
+              <li>seeing the Event being processed by a Flow; and</li>
+              <li>using a Procedure to query a DataSet to obtain the results.</li>
+            </ol>
+
+            <p>These are the basics of Continuuity Reactor.</p>
+            <p>For a programming quickstart, follow the <a target="_blank" href="http://www.continuuity.com/developers/quickstart">instructions online</a> about modifying the code and redeploying the app.</p>
+
+          </div>
+          <div class="modal-footer">
+            <button onclick="C.Util.NUX.restart();" class="btn btn-blank">Restart</button>
+            <button onclick="$('#nux-completed-modal').fadeOut();" class="btn btn-blank">Finish</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </script>
+
+  <script type="text/x-handlebars" data-template-name="Services">
+  <div id="reactor-services">
+    <div id="panels">
+
+      <div class="panel">
+        <table class="table">
+          <thead>
+            <th style="padding-left: 14px; min-width: 350px" class="service-col">Name</th>
+            <th style="min-width: 100px;" class="status-col center-align">Status
+            </th>
+            <th style="min-width: 100px;" class="logs-col center-align">Logs</th>
+            <th style="min-width: 200px;" class="instance-col center-align">Instances Requested</th>
+            <th style="min-width: 200px;" class="instance-col center-align">Provisioned</th>
+          </thead>
+          <tbody>
+          {{#each services}}
+            <tr>
+              <td style="max-width: 350px;" class="app-list-name service-col"><a class="none-text-decoration">
+                {{this.name}}
+              </a>
+                <br />
+                <span class="app-list-status">{{this.description}}</span>
+              </td>
+              <td style="max-width: 100px;" class="status-col center-align">
+                <span {{ bindAttr class=":service-icon this.imgClass" }} ></span>
+              </td>
+              <td style="max-width: 100px;" class="status-col center-align">
+
+                {{#if this.logsStatusOk}}
+                {{#linkTo 'Service.Log' this}}<span {{ bindAttr class=":log-icon this.logClass" }} ></span>{{/linkTo}}
+                {{ else }}
+                  <span data-toggle="tooltip" data-placement="right" title="Please contact your system admistrator for logs.">NA</span>
+                {{/if}}
+              </td>
+              <td style="max-width: 200px;" class="instance-col">
+                <div class="instance-wrapper">
+                  <div class="instance-num"><span>{{this.requested}}</span></div>
+                  <div>
+                    <a class="cursor-pointer" {{action decreaseInstance this.name this.requested }}>
+                      <span class="minus-icon"></span>
+                    </a>
+                    <a class="cursor-pointer" {{action increaseInstance this.name this.requested }}>
+                      <span class="plus-icon"></span>
+                    </a>
+                  </div>
+                </div>
+              <td style="max-width: 350px;" class="instance-provisioned service-col">
+                  <div class="instance-num auto-margin"><span>{{this.provisioned}}</span></div>
+              </td>
+            </tr>
+          {{/each}}
+          </tbody>
+        </table>
+      </div>
+
+
+    </div>
+  </div>
+  </script>
+
+  <script type="text/x-handlebars" data-template-name="Service">
+
+    <div id="title">
+      <ul class="nav nav-pills pull-right" style="margin: 2px 14px;">
+        <li>{{#linkTo Service.Log model}}Log{{/linkTo}}</li>
+      </ul>
+      <h1><span>Service</span> {{model.name}}</h1>
+    </div>
+
+    {{outlet}}
+
+  </script>
+
+  <script type="text/x-handlebars" data-template-name="Login">
+    <div id="title">
+      <h1>Login&nbsp;<span>Accounts</span></h1>
+    </div>
+    <div id="panels">
+      <div class="panel">
+        <div class="panel-body">
+          <div class="warning">{{warning}}</div>
+          {{view C.Embed.Login}}
+        </div>
+      </div>
+    </div>
+  </script>
+
+  <script type="text/x-handlebars" data-template-name="login-view">
+    <form method="POST" action="/login" id="login-form">
+    <table>
+      <tr>
+        <td>Username</td>
+        <td>{{input type="text" value=username class="username" name="username" }}</td>
+      </tr>
+      <tr>
+        <td>Password</td>
+        <td>{{input type="password" value=password class="password" name="password" }}</td>
+      </tr>
+      <tr>
+        <td></td>
+        <td>
+        <button type="button" class="btn btn-blank btn-default" id="login-submit-btn">Login</button>
+        </td>
+      </tr>
+    </table>
+    </form>
+  </script>
+
+  <script type="text/x-handlebars" data-template-name="AccessToken">
+    <div id="title">
+      <h1 class="pull-left">
+      {{#if token}}
+        Account&nbsp;<span>Access Token</span>
+        {{ else }}
+        Please login again to get your Access Token
+      {{/if}}
+      </h1>
+      {{#if token}}
+        <div class="pull-right">
+          <a class="btn btn-blue btn-default" href="/download-access-token/{{unbound token}}"><b>Download</b></a>
+        </div>
+      {{/if}}
+      <div style="clear: both"></div>
+    </div>
+    <div id="panels">
+      <div class="panel">
+        <div class="panel-body">
+          <div class="warning">{{warning}}</div>
+          {{#if token}}
+            <table class="table token-table" role="table">
+              <tr>
+                <td class="med-width bolder-font">Access Token</td>
+                <td class="lrg-width">{{token}}</td>
+              </tr>
+              <tr>
+                <td class="lrg-width bolder-font">Expires in</td>
+                <td class="lrg-width">{{token_expires}} sec</td>
+              </tr>
+            </table>
+            <br />
+            <br />
+            <h1>Usage</h1>
+            <br />
+            <div class="alert alert-info">
+              This is a long lasting Access Token that you can use to authenticate against Reactor. Access Tokens are used to identify and authenticate users.
+            </div>
+            <br />
+            <table class="table" role="table">
+              <tr>
+                <td class="bolder-font">Step 1</td>
+                <td>
+                  Click blue Download button above.
+                </td>
+              </tr>
+              <tr>
+                <td class="bolder-font">Step 2</td>
+                <td>
+                  Save the downloaded file as ".continuuity.accesstoken" under your home directory (~/).
+                </td>
+              </tr>
+              <tr>
+                <td class="bolder-font">Step 3</td>
+                <td>
+                  Run reactor and use the provided tools with a secured Reactor.
+                </td>
+              </tr>
+            </table>
+            <br />
+            <br />
+            <br />
+          {{else}}
+            <form id="login-form">
+            <table>
+              <tr>
+                <td>Username</td>
+                <td>{{input type="text" value=username class="username" name="username" }}</td>
+              </tr>
+              <tr>
+                <td>Password</td>
+                <td>{{input type="password" value=password class="password" name="password" }}</td>
+              </tr>
+              <tr>
+                <td></td>
+                <td>
+                <button class="btn btn-blank btn-default" {{action 'submit' on="click"}}>Login</button>
+                </td>
+              </tr>
+            </table>
+            </form>
+          {{/if}}
+        </div>
+      </div>
+    </div>
   </script>
 
   <script type="text/x-handlebars" data-template-name="Overview">
@@ -138,7 +414,7 @@
         <div class="panel-head">
           <input type="file" id="app-upload-input"/>
           {{view C.Embed.CreateButton entityType="Application"}}
-          <div class="panel-title">Apps</div>
+          <div class="panel-title">Applications</div>
         </div>
         {{partial "apps-list"}}
       </div>
@@ -193,29 +469,23 @@
   <script type="text/x-handlebars" data-template-name="App">
     <div id="title">
       {{view C.Embed.TimeSelector}}
-      <h1>{{model.name}} <span>App</span></h1>
+      <h1><span>Application</span> {{model.name}}</h1>
     </div>
 
     <div id="info">
       <div class="info-box" style="float: right; border: 0;padding: 0px 14px 0px 0px;">
-        <div id="action-buttons" class="btn-group pull-right">
-            <button class="btn dropdown-toggle" data-toggle="dropdown">
-              <span class="caret"></span>
-            </button>
-            {{#if C.isLocal}}
-            <button class="btn" style="width:64px;" {{action "promotePrompt"}}><span class="btn-drain"></span><span>Push</span></button>
-            {{/if}}
-
-            <ul class="dropdown-menu">
-              <li><a href="#" {{action "delete" on="click"}}>Delete This App</a></li>
-            </ul>
+        <div class="app-level-buttons">
+          {{#if C.isLocal}}
+            <button class="btn btn-blue force-margin-right-20" {{action "promotePrompt"}}><img class="inbtn-img" src="/assets/img/v2/push_icon.png" />Push</button>
+          {{/if}}
+          <button class="btn btn-blank" {{action "delete" on="click"}}><img class="inbtn-img" src="/assets/img/v2/delete_icon.png" />Delete</button>
         </div>
       </div>
       <div class="info-box sparkline-box app-processed">{{view C.Embed.Chart metrics="/reactor/apps/{id}/process.events.processed" title="Processed"}}</div>
       <div class="info-box sparkline-box app-busyness">{{view C.Embed.Chart metrics="/reactor/apps/{id}/process.busyness" unit="percent" title="Busyness"}}</div>
-      <div class="info-box app-storage" style="padding: 0;text-align: center;">
+      <div class="info-box app-storage" style="text-align: center;">
         <div class="sparkline-box-title">Storage</div>
-        <div class="sparkline-box-value" style="padding-left: 0;padding-top: 19px;width: 80px;">{{model.storageLabel}}<br /><span>{{model.storageUnits}}</span></div>
+        <div class="sparkline-box-value" style="padding-left: 0;padding-top: 23px;width: 100px;">{{model.storageLabel}}<span>{{model.storageUnits}}</span></div>
       </div>
     </div>
 
@@ -228,10 +498,10 @@
 
         <div class="panel-head">
           {{#if elements.Flow.length}}
-            <div class="btn-group pull-right" style="margin-top:2px;text-align:center;width:120px;">
-              <button {{action startAll "Flow" on="click"}} class="btn start">Start</button>
+            <div class="btn-group pull-right start-stop-btns" style="margin-top:2px;text-align:center;">
+              <button {{action startAll "Flow" on="click"}} class="btn start"><img src="/assets/img/v2/play_icon.png" /></button>
               <img style="display: none;margin-top: 3px;" src="/assets/img/start-all-load-white.gif" />
-              <button {{action stopAll "Flow" on="click"}} class="btn stop">Stop</button>
+              <button {{action stopAll "Flow" on="click"}} class="btn stop"><img src="/assets/img/v2/stop_active_icon.png" /></button>
             </div>
           {{/if}}
           <div class="panel-title">Process</div>
@@ -246,10 +516,10 @@
       <div class="panel" id ="query-panel">
         <div class="panel-head">
           {{#if elements.Procedure.length}}
-            <div class="btn-group pull-right" style="margin-top:2px;text-align:center;width:120px;">
-              <button {{action startAll "Procedure" on="click"}} class="btn start">Start</button>
+            <div class="btn-group pull-right start-stop-btns" style="margin-top:2px;text-align:center;">
+              <button {{action startAll "Procedure" on="click"}} class="btn start"><img src="/assets/img/v2/play_icon.png" /></button>
               <img style="display: none;margin-top: 3px;" src="/assets/img/start-all-load-white.gif" />
-              <button {{action stopAll "Procedure" on="click"}} class="btn stop">Stop</button>
+              <button {{action stopAll "Procedure" on="click"}} class="btn stop"><img src="/assets/img/v2/stop_active_icon.png" /></button>
             </div>
           {{/if}}
           <div class="panel-title">Query</div>
@@ -263,7 +533,7 @@
   <script type="text/x-handlebars" data-template-name="List">
     <div id="title">
       {{view C.Embed.TimeSelector}}
-      <h1>{{title}} <span>Data</span></h1>
+      <h1><span>Data</span> {{title}}</h1>
     </div>
     <div id="panels">
     <div class="panel">
@@ -275,15 +545,15 @@
   <script type="text/x-handlebars" data-template-name="Stream">
     <div id="title">
       {{view C.Embed.TimeSelector}}
-      <h1>{{model.name}} <span>Stream</span></h1>
+      <h1><span>Stream</span> {{model.name}}</h1>
     </div>
     <div id="info">
-      <div class="info-box sparkline-box">{{view C.Embed.Chart title="Events In" metrics="/reactor/streams/{id}/collect.events"}}</div>
-      <div class="info-box" style="padding: 0;text-align: center;">
+      <div class="info-box sparkline-box">{{view C.Embed.Chart title="Arrival Rate" metrics="/reactor/streams/{id}/collect.events"}}</div>
+      <div class="info-box" style="text-align: center;">
         <div class="sparkline-box-title">Storage</div>
-        <div class="sparkline-box-value" style="padding-left: 0;padding-top:19px;width: 80px;">{{model.storageLabel}}<br /><span>{{model.storageUnits}}</span></div>
+        <div class="sparkline-box-value" style="padding-left: 0;padding-top:19px;width: 100px;">{{model.storageLabel}}<br /><span>{{model.storageUnits}}</span></div>
       </div>
-      <div class="info-box" style="padding: 0;text-align: center;">
+      <div class="info-box" style="text-align: center;">
         <div class="sparkline-box-title">Events</div>
         <div class="sparkline-box-value" style="padding-top:19px;padding-left:0;width:100px;">{{model.eventsLabel}} {{model.eventsUnits}}<br /><span>Events</span></div>
       </div>
@@ -304,7 +574,7 @@
         <li>{{#linkTo WorkflowStatus model}}Status{{/linkTo}}</li>
         <li>{{#linkTo Workflow.History model}}History{{/linkTo}}</li>
       </ul>
-      <h1>{{model.name}} <span>Workflow</span></h1>
+      <h1><span>Workflow</span> {{model.name}}</h1>
     </div>
 
     {{outlet}}
@@ -336,7 +606,7 @@
       <div class="info-box" style="float: right; border: 0;">
         <div id="action-buttons" class="btn-group pull-right">
 
-          <button class="btn dropdown-toggle" data-toggle="dropdown">
+          <button class="btn btn-blank dropdown-toggle" data-toggle="dropdown">
             <span class="caret"></span>
           </button>
           <ul class="dropdown-menu">
@@ -356,8 +626,8 @@
             {{/if}}
           </ul>
 
-          <button class="btn" {{bindAttr disabled="model.startStopDisabled"}} style="width:64px;" {{action "exec" on="click"}}><span {{bindAttr class="model.actionIcon"}}></span><span>{{model.defaultAction}}</span></button>
-          <button class="btn btn-icon" style="border-right:0;" {{bindAttr disabled="model.startStopDisabled"}} {{action "config"}}><span class="btn-config"></span></button>
+          <button class="btn btn-blank" {{bindAttr disabled="model.startStopDisabled"}} style="width:64px;" {{action "exec" on="click"}}><span {{bindAttr class="model.actionIcon"}}></span><span>{{model.defaultAction}}</span></button>
+          <button class="btn btn-blank btn-icon" style="border-right:0;" {{bindAttr disabled="model.startStopDisabled"}} {{action "config"}}><span class="btn-config"></span></button>
 
         </div>
         <div class="flow-state"><strong>{{model.currentState}}</strong></div>
@@ -440,7 +710,7 @@
         <li>{{#linkTo Mapreduce.Log model}}Log{{/linkTo}}</li>
         <li>{{#linkTo Mapreduce.History model}}History{{/linkTo}}</li>
       </ul>
-      <h1>{{model.name}} <span>Mapreduce</span></h1>
+      <h1><span>Mapreduce</span> {{model.name}}</h1>
     </div>
 
     {{outlet}}
@@ -452,8 +722,8 @@
 
       <div class="info-box" style="float: right; border: 0;">
         <div id="action-buttons" class="btn-group pull-right">
-          <button class="btn" {{bindAttr disabled="model.startStopDisabled"}} style="width:64px;" {{action "exec" on="click"}}><span {{bindAttr class="model.actionIcon"}}></span><span>{{model.defaultAction}}</span></button>
-          <button class="btn btn-icon" {{bindAttr disabled="model.startStopDisabled"}} {{action "config"}}><span class="btn-config"></span></button>
+          <button class="btn btn-blank" {{bindAttr disabled="model.startStopDisabled"}} style="width:64px;" {{action "exec" on="click"}}><span {{bindAttr class="model.actionIcon"}}></span><span>{{model.defaultAction}}</span></button>
+          <button class="btn btn-blank btn-icon" {{bindAttr disabled="model.startStopDisabled"}} {{action "config"}}><span class="btn-config"></span></button>
         </div>
         <div class="flow-state"><strong>{{model.currentState}}</strong></div>
       </div>
@@ -549,7 +819,7 @@
         <li>{{#linkTo Flow.Log model}}Log{{/linkTo}}</li>
         <li>{{#linkTo Flow.History model}}History{{/linkTo}}</li>
       </ul>
-      <h1>{{model.meta.name}} <span>Flow</span></h1>
+      <h1><span>Flow</span> {{model.meta.name}}</h1>
     </div>
 
     {{outlet}}
@@ -561,7 +831,7 @@
     <div id="info">
       <div class="info-box" style="float: right; border: 0;padding-right: 14px;padding-left: 0px;">
         <div id="action-buttons" class="btn-group pull-right">
-          <button class="btn dropdown-toggle" data-toggle="dropdown">
+          <button class="btn btn-blank dropdown-toggle" data-toggle="dropdown">
             <span class="caret"></span>
           </button>
           <ul class="dropdown-menu">
@@ -572,8 +842,8 @@
             </li>
           </ul>
 
-          <button class="btn start-stop" {{bindAttr disabled="model.startStopDisabled"}} style="width:64px;" {{action "exec" on="click"}}><span {{bindAttr class="model.actionIcon"}}></span><span>{{model.defaultAction}}</span></button>
-          <button class="btn btn-icon" style="border-right:0;" {{bindAttr disabled="model.startStopDisabled"}} {{action "config"}}><span class="btn-config"></span></button>
+          <button class="btn btn-blank start-stop" {{bindAttr disabled="model.startStopDisabled"}} style="width:64px;" {{action "exec" on="click"}}><span {{bindAttr class="model.actionIcon"}}></span><span>{{model.defaultAction}}</span></button>
+          <button class="btn btn-blank btn-icon" style="border-right:0;" {{bindAttr disabled="model.startStopDisabled"}} {{action "config"}}><span class="btn-config"></span></button>
         </div>
         <div class="flow-state"><strong>{{model.currentState}}</strong></div>
       </div>
@@ -589,7 +859,7 @@
         <div id="flowviz-container">
 
           <div class="btn-group" style="float: left;">
-            <button class="btn dropdown-toggle" data-toggle="dropdown" style="padding-left:14px;float: right;">
+            <button class="btn btn-blank dropdown-toggle" data-toggle="dropdown" style="padding-left:14px;float: right;">
               {{flowletLabelName}} <span class="caret"></span>
             </button>
             <ul class="dropdown-menu">
@@ -620,12 +890,12 @@
 
           {{#if controllers.FlowStatus.model.running}}
             <div class="btn-group pull-right" style="margin-top: 4px;">
-              <button class="btn" {{action "addOneInstance" on="click"}}>+</button>
-              <button class="btn" {{action "removeOneInstance" on="click"}}>-</button>
+              <button class="btn btn-blank" {{action "addOneInstance" on="click"}}>+</button>
+              <button class="btn btn-blank" {{action "removeOneInstance" on="click"}}>-</button>
               {{#if C.isLocal}}
-                <button disabled="disabled" class="btn" style="width: 200px;text-align:left;">{{model.instances}} instance{{model.pluralInstances}}</button>
+                <button disabled="disabled" class="btn btn-blank" style="width: 200px;text-align:left;">{{model.instances}} instance{{model.pluralInstances}}</button>
               {{else}}
-                <button disabled="disabled" class="btn" style="width: 200px;text-align:left;">{{model.containersLabel}} instance{{model.pluralInstances}} ({{model.instances}} Requested)</button>
+                <button disabled="disabled" class="btn btn-blank" style="width: 200px;text-align:left;">{{model.containersLabel}} instance{{model.pluralInstances}} ({{model.instances}} Requested)</button>
               {{/if}}
             </div>
           {{/if}}
@@ -760,7 +1030,7 @@
             <tr>
             <td class="app-list-count" {{bindAttr title="model.storageRaw"}}>{{model.storageLabel}}<br /><span>{{model.storageUnits}}</span></td>
             <td class="app-list-count" {{bindAttr title="model.eventsRaw"}}>{{model.eventsLabel}}{{model.eventsUnits}}<br /><span>Events</span></td>
-            <td style="padding-right: 0;">
+            <td style="padding-right: 0;max-width:295px;">
             {{view C.Embed.Chart entityType="Stream" width="376" mode="singular" metrics="/reactor/streams/{id}/collect.events"}}
             </td>
             </tr>
@@ -769,7 +1039,7 @@
 
           <div class="popup-inject-wrapper">
             {{view C.Embed.Injector placeholder="Events injected here will be consumed by all attached programs."}}
-            <button class="btn" style="float: right;" {{action "inject" on="click"}}>Inject</button>
+            <button class="btn btn-blank" style="float: right;" {{action "inject" on="click"}}>Inject</button>
             <span class="sparkline-box-title">
             {{view Em.Checkbox checkedBinding=controller.injectOnEnter}} Inject by pressing Enter
             </span>
@@ -828,16 +1098,16 @@
   <script type="text/x-handlebars" data-template-name="Dataset">
     <div id="title">
       {{view C.Embed.TimeSelector}}
-      <h1>{{model.name}} <span>Dataset</span></h1>
+      <h1><span>Dataset</span> {{model.name}}</h1>
     </div>
     <div id="info">
-      <div class="info-box sparkline-box write-rate">{{view C.Embed.Chart title="Write Rate (Bytes)" metrics="/reactor/datasets/{id}/store.bytes" unit="bytes"}}</div>
-      <div class="info-box sparkline-box write-rate">{{view C.Embed.Chart title="Write Rate (Ops)" metrics="/reactor/datasets/{id}/store.reads" unit="OPS/S"}}</div>
-      <div class="info-box sparkline-box read-rate">{{view C.Embed.Chart title="Read Rate (Ops)" metrics="/reactor/datasets/{id}/store.reads" unit="OPS/S"}}</div>
+      <div class="info-box sparkline-box write-rate">{{view C.Embed.Chart title="Write Rate (Bytes)" metrics="/reactor/datasets/{id}/dataset.store.bytes" unit="bytes"}}</div>
+      <div class="info-box sparkline-box write-rate">{{view C.Embed.Chart title="Write Rate (Ops)" metrics="/reactor/datasets/{id}/dataset.store.writes" unit="OPS/S"}}</div>
+      <div class="info-box sparkline-box read-rate">{{view C.Embed.Chart title="Read Rate (Ops)" metrics="/reactor/datasets/{id}/dataset.store.reads" unit="OPS/S"}}</div>
 
-      <div class="info-box app-storage" style="padding: 0;text-align: center;">
+      <div class="info-box app-storage" style="text-align: center;">
         <div class="sparkline-box-title">Stored</div>
-        <div class="sparkline-box-value" style="padding-left: 0;padding-top:16px;width: 80px;">{{model.storageLabel}}<br /><span>{{model.storageUnits}}</span></div>
+        <div class="sparkline-box-value" style="padding-left: 0;padding-top:16px;width: 100px;">{{model.storageLabel}}<br /><span>{{model.storageUnits}}</span></div>
       </div>
 
     </div>
@@ -859,7 +1129,7 @@
         <li>{{#linkTo ProcedureStatus model}}Status{{/linkTo}}</li>
         <li>{{#linkTo Procedure.Log model}}Log{{/linkTo}}</li>
       </ul>
-      <h1>{{model.name}} <span>Procedure</span></h1>
+      <h1><span>Procedure</span> {{model.name}}</h1>
     </div>
 
     {{outlet}}
@@ -871,14 +1141,14 @@
     <div id="info">
       <div class="info-box" style="float: right; border: 0;">
         <div id="action-buttons" class="btn-group pull-right">
-          <button class="btn" {{bindAttr disabled="model.startStopDisabled"}} style="width:64px;" {{action "exec" on="click"}}><span {{bindAttr class="model.actionIcon"}}></span><span>{{model.defaultAction}}</span></button>
-          <button class="btn btn-icon" {{bindAttr disabled="model.startStopDisabled"}} {{action "config"}}><span class="btn-config"></span></button>
+          <button class="btn btn-blank" {{bindAttr disabled="model.startStopDisabled"}} style="width:64px;" {{action "exec" on="click"}}><span {{bindAttr class="model.actionIcon"}}></span><span>{{model.defaultAction}}</span></button>
+          <button class="btn btn-blank btn-icon" {{bindAttr disabled="model.startStopDisabled"}} {{action "config"}}><span class="btn-config"></span></button>
         </div>
         <div class="flow-state"><strong>{{model.currentState}}</strong></div>
       </div>
 
-      <div class="info-box sparkline-box">{{view C.Embed.Chart title="Successful Requests" metrics="/reactor/apps/{parent}/procedures/{id}/query.requests"}}</div>
-      <div class="info-box sparkline-box">{{view C.Embed.Chart title="Failed Requests" metrics="/reactor/apps/{parent}/procedures/{id}/query.failures"}}</div>
+      <div class="info-box sparkline-box">{{view C.Embed.Chart title="Successful" metrics="/reactor/apps/{parent}/procedures/{id}/query.requests"}}</div>
+      <div class="info-box sparkline-box">{{view C.Embed.Chart title="Failed" metrics="/reactor/apps/{parent}/procedures/{id}/query.failures"}}</div>
     </div>
     <div id="panels">
 
@@ -887,13 +1157,13 @@
 
         {{#if model.running}}
           <div class="btn-group pull-right">
-            <button class="btn" {{action "addOneInstance" on="click"}}>+</button>
-            <button class="btn" {{action "removeOneInstance" on="click"}}>-</button>
+            <button class="btn btn-blank" {{action "addOneInstance" on="click"}}>+</button>
+            <button class="btn btn-blank" {{action "removeOneInstance" on="click"}}>-</button>
 
             {{#if C.isLocal}}
-              <button disabled="disabled" class="btn" style="width: 200px;text-align:left;">{{model.instances}} instance{{model.pluralInstances}}</button>
+              <button disabled="disabled" class="btn btn-blank" style="text-align:left;">{{model.instances}} instance{{model.pluralInstances}}</button>
             {{else}}
-              <button disabled="disabled" class="btn" style="width: 200px;text-align:left;">{{actualInstances}} ({{model.instances}} Requested)</button>
+              <button disabled="disabled" class="btn btn-blank" style="text-align:left;">{{actualInstances}} ({{model.instances}} Requested)</button>
             {{/if}}
 
           </div>
@@ -915,15 +1185,15 @@
           <tbody>
           <tr>
             <td>
-              {{view C.Embed.TextField valueBinding="requestMethod" }}
+              {{view C.Embed.TextField valueBinding="controllers.Procedure.requestMethod" id="method-name"}}
             </td>
             <td>
-              {{view C.Embed.Injector valueBinding="requestParams"}}
+              {{view C.Embed.Injector valueBinding="controllers.Procedure.requestParams"}}
               <br />
               {{#if model.running}}
-              <button {{action "submit"}} class="btn">Execute</button>
+              <button id="execute-button" {{action "submit"}} class="btn btn-blank">Execute</button>
               {{else}}
-              <button disabled="disabled" class="btn">Click "Start" Above</button>
+              <button disabled="disabled" class="btn btn-blank">Click "Start" Above</button>
               {{/if}}
             </td>
 
@@ -950,13 +1220,13 @@
     <div id="title">
       {{view C.Embed.TimeSelector}}
       <div style="float: right;margin-top: 2px;">
-        <button class="btn pause" {{action togglePause}}>{{pausedLabel}}</button>
+        <button class="btn btn-blank pause force-margin-right-20" {{action togglePause}}>{{pausedLabel}}</button>
       </div>
       <h1>Metrics <span>Explorer</span></h1>
     </div>
     <div id="panels">
       <div class="panel" id="analyze-selected">
-        <div class="panel-body clearfix">
+        <div class="clearfix">
 
           <div class="analyze-selected">
             <ul>
@@ -1046,18 +1316,18 @@
 
         </div>
           <div class="modal-footer">
-            <button {{action close}} class="btn">Cancel</button>
-            <button {{action clear}} style="margin-right: 5px;" class="btn">Clear</button>
+            <button {{action close}} class="btn btn-blank">Cancel</button>
+            <button {{action clear}} style="margin-right: 5px;" class="btn btn-blank">Clear</button>
             {{#if runnable}}
               {{#if model.running}}
-                <button {{action save}} class="btn">Save and Close</button>
-                <button {{action saveAndRestart}} class="btn">Save and Restart</button>
+                <button {{action save}} class="btn btn-blank">Save and Close</button>
+                <button {{action saveAndRestart}} class="btn btn-blank">Save and Restart</button>
               {{else}}
-                <button {{action runOnce}} class="btn">Run Once</button>
-                <button {{action saveAndRun}} class="btn">Save and Run</button>
+                <button {{action runOnce}} class="btn btn-blank">Run Once</button>
+                <button {{action saveAndRun}} class="btn btn-blank">Save and Run</button>
               {{/if}}
             {{else}}
-            <button {{action save}} class="btn">Save and Close</button>
+            <button {{action save}} class="btn btn-blank">Save and Close</button>
             {{/if}}
           </div>
       </div>
@@ -1174,7 +1444,7 @@
             <td class="app-list-count">{{counts.Flow}}</strong></td>
             <td class="app-list-count">{{counts.Dataset}}</strong></td>
             <td class="app-list-count">{{counts.Procedure}}</strong></td>
-            <td>{{view C.Embed.Chart entityIdBinding=id entityType="App" height="50" metrics="/reactor/apps/{id}/process.busyness" unit="percent"}}</td>
+            <td style="max-width:264px;">{{view C.Embed.Chart entityIdBinding=id entityType="App" height="50" metrics="/reactor/apps/{id}/process.busyness" unit="percent"}}</td>
           </tr>
         {{/each}}
         </tbody>
@@ -1192,7 +1462,7 @@
   <script type="text/x-handlebars" data-template-name="list-page">
     <div id="title">
       {{view C.Embed.TimeSelector}}
-      <h1>{{controller.title}} <span>Data</span></h1>
+      <h1><span>Data</span> {{controller.title}}</h1>
     </div>
 
     <div id="panels">
@@ -1210,7 +1480,7 @@
         <th style="padding-left: 14px;">Streams</th>
         <th style="width: 100px;text-align: center;">Storage</th>
         <th style="width: 100px;padding: 3px 0px 0px;text-align: center;">Events</th>
-        <th style="width: 262px;">Arrival Rate</th>
+        <th style="width: 262px;">Arrival Rate (EPS)</th>
       </thead>
       <tbody>
         {{#each elements.Stream }}
@@ -1218,9 +1488,9 @@
             <td class="app-list-name">
             <a {{bindAttr href="href"}}>{{name}}</a><br /><span class="app-list-status">Stream</span>
             </td>
-            <td class="app-list-count">{{storageLabel}}<br /><span>{{storageUnits}}</span></td>
-            <td class="app-list-count">{{eventsLabel}}<br /><span>Events</span></td>
-            <td>{{view C.Embed.Chart entityIdBinding=id entityType="Stream" mode="singular" metrics="/reactor/streams/{id}/collect.events"}}</td>
+            <td class="app-list-count">{{storageLabel}}<span>{{storageUnits}}</span></td>
+            <td class="app-list-count">{{eventsLabel}}{{eventsUnits}}</td>
+            <td style="max-width:262px;">{{view C.Embed.Chart entityIdBinding=id entityType="Stream" mode="singular" metrics="/reactor/streams/{id}/collect.events"}}</td>
           </tr>
         {{/each}}
       </tbody>
@@ -1250,8 +1520,8 @@
             <td class="app-list-name">
             <a {{bindAttr href="href"}}>{{name}}</a><br /><span class="app-list-status app-status">{{currentState}}</span>
             </td>
-            <td>{{view C.Embed.Chart entityIdBinding=id entityType="Flow" metrics="/reactor/apps/{parent}/flows/{id}/process.events.processed"}}</td>
-            <td>{{view C.Embed.Chart entityIdBinding=id entityType="Flow" metrics="/reactor/apps/{parent}/flows/{id}/process.busyness" unit="percent"}}</td>
+            <td style="max-width:262px;">{{view C.Embed.Chart entityIdBinding=id entityType="Flow" metrics="/reactor/apps/{parent}/flows/{id}/process.events.processed"}}</td>
+            <td style="max-width:262px;">{{view C.Embed.Chart entityIdBinding=id entityType="Flow" metrics="/reactor/apps/{parent}/flows/{id}/process.busyness" unit="percent"}}</td>
           </tr>
         {{/each}}
         </tbody>
@@ -1277,8 +1547,8 @@
               <td class="app-list-name">
               <a {{bindAttr href="href"}}>{{name}}</a><br /><span class="app-list-status app-status">{{currentState}}</span>
               </td>
-              <td>{{view C.Embed.Chart entityIdBinding=id entityType="Mapreduce" metrics="/reactor/apps/{parent}/mapreduce/{id}/mappers/process.completion" unit="percent"}}</td>
-              <td>{{view C.Embed.Chart entityIdBinding=id entityType="Mapreduce" metrics="/reactor/apps/{parent}/mapreduce/{id}/reducers/process.completion" unit="percent"}}</td>
+              <td style="max-width:262px;">{{view C.Embed.Chart entityIdBinding=id entityType="Mapreduce" metrics="/reactor/apps/{parent}/mapreduce/{id}/mappers/process.completion" unit="percent"}}</td>
+              <td style="max-width:262px;">{{view C.Embed.Chart entityIdBinding=id entityType="Mapreduce" metrics="/reactor/apps/{parent}/mapreduce/{id}/reducers/process.completion" unit="percent"}}</td>
             </tr>
           {{/each}}
           </tbody>
@@ -1306,7 +1576,7 @@
     {{#if elements.Dataset.length}}
       <table class="table">
         <thead>
-        <th style="padding-left: 14px;">Datasets</th>
+        <th style="padding-left: 14px;">DataSets</th>
         <th style="width: 100px;text-align: center;">Storage</th>
         <th style="width: 262px;">Write Rate (Bytes)</th>
         </thead>
@@ -1317,7 +1587,7 @@
             <a {{bindAttr href="href"}}>{{name}}</a><br /><span class="app-list-status">{{classname}}</span>
             </td>
             <td class="app-list-count">{{storageLabel}}<br /><span>{{storageUnits}}</span></td>
-            <td>{{view C.Embed.Chart entityIdBinding=id entityType="Dataset" mode="singular" metrics="/reactor/datasets/{id}/store.bytes"}}</td>
+            <td style="max-width:262px;">{{view C.Embed.Chart entityIdBinding=id entityType="Dataset" mode="singular" metrics="/reactor/datasets/{id}/dataset.store.bytes"}}</td>
           </tr>
         {{/each}}
         </tbody>
@@ -1325,7 +1595,7 @@
     {{else}}
     <div class="object-list-empty">
       <div class="object-list-empty-content">
-        <div>No Datasets.</div>
+        <div>No DataSets.</div>
           <span>Please create one in code or on the commandline.</span>
         </div>
     </div>
@@ -1346,8 +1616,8 @@
             <td class="app-list-name">
             <a {{bindAttr href="href"}}>{{name}}</a><br /><span class="app-list-status app-status">{{currentState}}</span>
             </td>
-            <td>{{view C.Embed.Chart entityIdBinding=id entityType="Procedure" metrics="/reactor/apps/{parent}/procedures/{id}/query.requests"}}</td>
-            <td>{{view C.Embed.Chart entityIdBinding=id entityType="Procedure" metrics="/reactor/apps/{parent}/procedures/{id}/query.failures"}}</td>
+            <td style="max-width:262px;">{{view C.Embed.Chart entityIdBinding=id entityType="Procedure" metrics="/reactor/apps/{parent}/procedures/{id}/query.requests"}}</td>
+            <td style="max-width:262px;">{{view C.Embed.Chart entityIdBinding=id entityType="Procedure" metrics="/reactor/apps/{parent}/procedures/{id}/query.failures"}}</td>
           </tr>
         {{/each}}
       </tbody>
@@ -1418,18 +1688,47 @@
       </div>
       {{#if promoteSucceeded}}
         <div class="modal-footer">
-          <button {{action "destroy" target="view"}} class="btn">Done</button>
+          <button {{action "destroy" target="view"}} class="btn btn-blank">Done</button>
         </div>
       {{else}}
         {{#unless pushing}}
           <div class="modal-footer">
-            <button {{action "destroy" target="view"}} class="btn">Cancel</button>
+            <button {{action "destroy" target="view"}} class="btn btn-blank">Cancel</button>
             {{#if destinations.length}}
-              <button {{action "promoteSubmit"}} class="btn">Push</button>
+              <button {{action "promoteSubmit"}} class="btn btn-blank">Push</button>
             {{/if}}
           </div>
         {{/unless}}
       {{/if}}
+    </div>
+  </script>
+
+  <script type="text/x-handlebars" data-template-name="Loading">
+    <div id="services-loading">
+      <div class="services-box">
+        <div class="animated">
+          <img src="assets/img/services-loading.gif" />Loading Services...
+        </div>
+        <ul class="services-list">
+          {{#each serviceStatuses}}
+          <li class="service">
+            <span class="lowercasify">{{this.name}}</span>
+            <span {{ bindAttr class=":service-icon this.imgClass" }} ></span>
+          </li>
+          {{/each}}
+        </ul>
+      </div>
+    </div>
+  </script>
+
+  <script type="text/x-handlebars" data-template-name="ConnectionError">
+    <div id="services-loading">
+      <div class="services-box">
+        <div class="animated large">
+          There seems to be a connection problem... <br />
+          Please wait.
+        </div>
+      </div>
     </div>
   </script>
 

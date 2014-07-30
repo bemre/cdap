@@ -3,18 +3,22 @@
  */
 package com.continuuity.metrics.data;
 
-import com.continuuity.data2.OperationException;
 import com.continuuity.common.conf.CConfiguration;
 import com.continuuity.common.conf.Constants;
 import com.continuuity.common.guice.ConfigModule;
 import com.continuuity.common.guice.LocationRuntimeModule;
+import com.continuuity.common.metrics.MetricsCollectionService;
+import com.continuuity.common.metrics.NoOpMetricsCollectionService;
 import com.continuuity.data.runtime.DataFabricLevelDBModule;
+import com.continuuity.data2.OperationException;
+import com.continuuity.data2.transaction.runtime.TransactionMetricsModule;
 import com.continuuity.metrics.MetricsConstants;
 import com.continuuity.metrics.transport.MetricsRecord;
 import com.continuuity.metrics.transport.TagMetric;
 import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.inject.AbstractModule;
 import com.google.inject.Guice;
 import com.google.inject.Injector;
 import com.google.inject.PrivateModule;
@@ -25,6 +29,7 @@ import org.junit.ClassRule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
@@ -101,7 +106,7 @@ public class LevelDBFilterableOVCTableTest {
     for (int i = -2; i < secondsToQuery + 2; i++) {
       records.add(new MetricsRecord(context, "0", "reads", tags, ts + i, i));
     }
-    List<TimeValue > expectedFlowlet1Timevalues = Lists.newArrayListWithExpectedSize(secondsToQuery);
+    List<TimeValue> expectedFlowlet1Timevalues = Lists.newArrayListWithExpectedSize(secondsToQuery);
     for (int i = 0; i < secondsToQuery; i++) {
       expectedFlowlet1Timevalues.add(new TimeValue(ts + i, i));
     }
@@ -125,14 +130,14 @@ public class LevelDBFilterableOVCTableTest {
       .build(ts, ts + secondsToQuery - 1);
     MetricsScanner scanner = tsTable.scan(query);
 
-    Map<String, List<TimeValue >> actualResults = Maps.newHashMap();
+    Map<String, List<TimeValue>> actualResults = Maps.newHashMap();
     while (scanner.hasNext()) {
       MetricsScanResult result = scanner.next();
 
       // check the metric
       Assert.assertTrue(result.getMetric().startsWith("reads"));
 
-      List<TimeValue > metricTimeValues = actualResults.get(result.getContext());
+      List<TimeValue> metricTimeValues = actualResults.get(result.getContext());
       if (metricTimeValues == null) {
         metricTimeValues = Lists.newArrayList();
         actualResults.put(result.getContext(), metricTimeValues);
@@ -147,8 +152,8 @@ public class LevelDBFilterableOVCTableTest {
   private void assertEqualResults(Map<String, List<TimeValue>> expected, Map<String, List<TimeValue>> actual) {
     Assert.assertEquals(expected.size(), actual.size());
     for (String context : expected.keySet()) {
-      List<TimeValue > expectedValues = expected.get(context);
-      List<TimeValue > actualValues = actual.get(context);
+      List<TimeValue> expectedValues = expected.get(context);
+      List<TimeValue> actualValues = actual.get(context);
       Assert.assertEquals(expectedValues.size(), actualValues.size());
 
       // check all the values seen are expected
@@ -168,15 +173,16 @@ public class LevelDBFilterableOVCTableTest {
 
 
   @BeforeClass
-  public static void init() {
+  public static void init() throws IOException {
     CConfiguration cConf = CConfiguration.create();
     cConf.set(MetricsConstants.ConfigKeys.TIME_SERIES_TABLE_ROLL_TIME, String.valueOf(rollTime));
-    cConf.unset(Constants.CFG_DATA_LEVELDB_DIR);
+    cConf.set(Constants.CFG_LOCAL_DATA_DIR, tmpFolder.newFolder().getAbsolutePath());
 
     Injector injector = Guice.createInjector(
       new ConfigModule(cConf),
-      new DataFabricLevelDBModule(cConf),
+      new DataFabricLevelDBModule(),
       new LocationRuntimeModule().getSingleNodeModules(),
+      new TransactionMetricsModule(),
       new PrivateModule() {
 
         @Override
