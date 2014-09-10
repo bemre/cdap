@@ -15,13 +15,14 @@
  */
 package co.cask.cdap.common.http;
 
-import co.cask.cdap.internal.io.ByteBufferInputStream;
+import co.cask.cdap.common.http.internal.ByteBufferInputStream;
 import com.google.common.base.Charsets;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.io.ByteStreams;
 import com.google.common.io.Files;
 import com.google.common.io.InputSupplier;
+import com.sun.istack.internal.Nullable;
 
 import java.io.File;
 import java.io.IOException;
@@ -30,7 +31,7 @@ import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.Map;
-import javax.annotation.Nullable;
+
 
 /**
  * Represents an HTTP request to be executed by {@link HttpRequests}.
