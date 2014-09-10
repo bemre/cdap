@@ -998,7 +998,7 @@
     -->
     <property>
         <name>security.authentication.handlerClassName</name>
-        <value></value>
+        <value>co.cask.cdap.security.server.BasicAuthenticationHandler</value>
     </property>
 
     <property>
@@ -1008,7 +1008,7 @@
 
     <property>
       <name>security.authentication.basic.realmfile</name>
-      <value></value>
+      <value>/Users/Shu/Documents/cask/cdap/security/src/main/resources/realm.properties</value>
     </property>
 
     <property>
@@ -1036,7 +1036,7 @@
   -->
   <property>
       <name>security.enabled</name>
-      <value>false</value>
+      <value>true</value>
       <description>If this is set to true, security layer will be up and active</description>
   </property>
 

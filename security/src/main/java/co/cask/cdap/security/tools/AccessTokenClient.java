@@ -16,7 +16,10 @@
 
 package co.cask.cdap.security.tools;
 
+import co.cask.cdap.common.conf.CConfiguration;
+import co.cask.cdap.common.conf.Constants;
 import co.cask.cdap.common.utils.UsageException;
+import co.cask.cdap.security.auth.AccessToken;
 import co.cask.cdap.security.server.ExternalAuthenticationServer;
 import com.google.common.io.ByteStreams;
 import com.google.gson.JsonArray;
@@ -33,7 +36,12 @@ import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.conn.ClientConnectionManager;
+import org.apache.http.conn.scheme.Scheme;
+import org.apache.http.conn.scheme.SchemeRegistry;
+import org.apache.http.conn.ssl.SSLSocketFactory;
 import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.conn.BasicClientConnectionManager;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 
@@ -43,9 +51,14 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.net.URI;
+import java.security.SecureRandom;
+import java.security.cert.CertificateException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 /**
  * Client to get an AccessToken using username:password authentication.
@@ -184,9 +197,19 @@ public class AccessTokenClient {
     }
   }
 
-  private String getAuthenticationServerAddress() throws IOException {
-    HttpClient client = new DefaultHttpClient();
-    HttpGet get = new HttpGet(String.format("http://%s:%d", host, port));
+  private String getAuthenticationServerAddress(boolean useSsl) throws IOException {
+    HttpClient client = null;
+    try {
+      client = getHTTPClient();
+    } catch (Exception e) {
+      e.printStackTrace();
+    }
+    String baseUrl = "http";
+    if (useSsl) {
+      baseUrl = "https";
+//      port = CConfiguration.create().getInt(Constants.Security.AuthenticationServer.SSL_PORT);
+    }
+    HttpGet get = new HttpGet(String.format("%s://%s:%d", baseUrl, host, port));
     HttpResponse response = client.execute(get);
 
     if (response.getStatusLine().getStatusCode() == 200) {
@@ -207,6 +230,40 @@ public class AccessTokenClient {
     return list.get(new Random().nextInt(list.size()));
   }
 
+  protected DefaultHttpClient getHTTPClient() throws Exception {
+    SSLContext sslContext = SSLContext.getInstance("SSL");
+
+    // set up a TrustManager that trusts everything
+    sslContext.init(null, new TrustManager[] { new X509TrustManager() {
+      @Override
+      public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+        return null;
+      }
+
+      @Override
+      public void checkClientTrusted(java.security.cert.X509Certificate[] x509Certificates, String s)
+        throws CertificateException {
+        //
+      }
+
+      @Override
+      public void checkServerTrusted(java.security.cert.X509Certificate[] x509Certificates, String s)
+        throws CertificateException {
+        //
+      }
+
+    } }, new SecureRandom());
+
+    SSLSocketFactory sf = new SSLSocketFactory(sslContext);
+    Scheme httpsScheme = new Scheme("https", 10101, sf);
+    SchemeRegistry schemeRegistry = new SchemeRegistry();
+    schemeRegistry.register(httpsScheme);
+
+    // apache HttpClient version >4.2 should use BasicClientConnectionManager
+    ClientConnectionManager cm = new BasicClientConnectionManager(schemeRegistry);
+    return new DefaultHttpClient(cm);
+  }
+
   public String execute0(String[] args) {
     buildOptions();
     parseArguments(args);
@@ -216,9 +273,10 @@ public class AccessTokenClient {
 
     String baseUrl;
     try {
-      baseUrl = getAuthenticationServerAddress();
+      baseUrl = getAuthenticationServerAddress(true);
     } catch (IOException e) {
       System.err.println("Could not find Authentication service to connect to.");
+      e.printStackTrace();
       return null;
     }
 
@@ -228,6 +286,7 @@ public class AccessTokenClient {
     HttpClient client = new DefaultHttpClient();
     HttpResponse response;
 
+    System.err.println("BASE: " + baseUrl);
     // construct the full URL and verify its well-formedness
     try {
       URI.create(baseUrl);
@@ -288,7 +347,9 @@ public class AccessTokenClient {
 
   public static void main(String[] args) {
     AccessTokenClient accessTokenClient = new AccessTokenClient();
-    String value = accessTokenClient.execute(args);
+    String[] myArgs = {"--host", "127.0.0.1", "--username", "admin", "--password", "realtime",
+                      "--file", "/Users/Shu/Documents/unused_key.txt"};
+    String value = accessTokenClient.execute(myArgs);
     if (value == null) {
       System.exit(1);
     }
