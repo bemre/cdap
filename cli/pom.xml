@@ -92,6 +92,73 @@
           </execution>
         </executions>
       </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <version>2.4</version>
+        <executions>
+          <execution>
+            <id>tgz-package</id>
+            <configuration combine.self="override">
+              <skipAssembly>true</skipAssembly>
+            </configuration>
+            <goals>
+              <goal>single</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>cli-package</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+            <configuration combine.self="override">
+              <descriptors>
+                <descriptor>${project.basedir}/src/main/assembly/cli.xml</descriptor>
+              </descriptors>
+              <appendAssemblyId>false</appendAssemblyId>
+              <attach>false</attach>
+              <finalName>cdap-cli-${project.version}</finalName>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-antrun-plugin</artifactId>
+      <version>1.7</version>
+      <executions>
+        <!-- Rename CLI jar and make CLI scripts executable -->
+        <execution>
+          <id>copy-cli-bash</id>
+          <phase>package</phase>
+          <configuration>
+            <target>
+              <copy file="${project.basedir}/target/cli-${project.version}.jar"
+                    tofile="${stage.opt.dir}/bin/cdap-cli.jar" />
+              <copy file="${project.basedir}/bin/cdap-cli.sh" tofile="${stage.opt.dir}/bin/cdap-cli.sh" />
+              <chmod file="${stage.opt.dir}/bin/cdap-cli.sh" perm="755"/>
+              <copy file="${project.basedir}/bin/cdap-cli.bat" tofile="${stage.opt.dir}/bin/cdap-cli.bat" />
+              <chmod file="${stage.opt.dir}/bin/cdap-cli.bat" perm="755"/>
+            </target>
+          </configuration>
+          <goals>
+            <goal>run</goal>
+          </goals>
+        </execution>
+      </executions>
+      </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <profile>
+    <id>dist</id>
+      <properties>
+        <cli.dir>${project.build.directory}</cli.dir>
+        <stage.opt.dir>${cli.dir}/cdap-cli-${project.version}</stage.opt.dir>
+      </properties>
+    </profile>
+  </profiles>
 </project>

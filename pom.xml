@@ -1915,7 +1915,7 @@
               <version>2.4</version>
               <executions>
                 <execution>
-                  <id>tgz-package</id>
+                  <id>tgz-package-sdk</id>
                   <phase>package</phase>
                   <goals>
                     <goal>single</goal>
