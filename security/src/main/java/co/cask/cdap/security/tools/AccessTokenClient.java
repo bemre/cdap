@@ -78,7 +78,7 @@ public class AccessTokenClient {
   private boolean help = false;
 
   private String host;
-  private int port = 10000;
+  private int port = 9443;
 
   private String username;
   private String password;
@@ -264,7 +264,7 @@ public class AccessTokenClient {
     return new DefaultHttpClient(cm);
   }
 
-  public String execute0(String[] args) {
+  public String execute0(String[] args) throws Exception {
     buildOptions();
     parseArguments(args);
     if (help) {
@@ -283,7 +283,7 @@ public class AccessTokenClient {
     System.out.println(String.format("Authentication server address is: %s", baseUrl));
     System.out.println(String.format("Authenticating as: %s", username));
 
-    HttpClient client = new DefaultHttpClient();
+    HttpClient client = getHTTPClient();
     HttpResponse response;
 
     System.err.println("BASE: " + baseUrl);
@@ -303,6 +303,7 @@ public class AccessTokenClient {
       response = client.execute(get);
     } catch (IOException e) {
       System.err.println("Error sending HTTP request: " + e.getMessage());
+      e.printStackTrace();
       return null;
     }
     if (response.getStatusLine().getStatusCode() != HttpStatus.SC_OK) {
@@ -333,7 +334,7 @@ public class AccessTokenClient {
     return "OK.";
   }
 
-  public String execute(String[] args) {
+  public String execute(String[] args) throws Exception {
     try {
       return execute0(args);
     } catch (UsageException e) {
@@ -345,10 +346,10 @@ public class AccessTokenClient {
     return null;
   }
 
-  public static void main(String[] args) {
+  public static void main(String[] args) throws Exception {
     AccessTokenClient accessTokenClient = new AccessTokenClient();
-    String[] myArgs = {"--host", "127.0.0.1", "--username", "admin", "--password", "realtime",
-                      "--file", "/Users/Shu/Documents/unused_key.txt"};
+    String[] myArgs = {"--host", "127.0.0.1", "--username", "user", "--password", "pass",
+                      "--file", "/tmp/gen_unused_key.txt"};
     String value = accessTokenClient.execute(myArgs);
     if (value == null) {
       System.exit(1);
