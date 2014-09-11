@@ -53,6 +53,11 @@
         <description>Forward rules for router (port:service -> forward port to service)</description>
     </property>
 
+  <property>
+    <name>router.ssl.bind.port</name>
+    <value>9443</value>
+  </property>
+
     <!--
         Logging Configuration
     -->
@@ -111,4 +116,51 @@
         <value>443</value>
     </property>
 
+
+  <property>
+    <name>security.enabled</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>security.authentication.handlerClassName</name>
+    <value>co.cask.cdap.security.server.BasicAuthenticationHandler</value>
+  </property>
+  <property>
+    <name>security.authentication.basic.realmfile</name>
+    <value>/Users/alvin/Work/workspace/caskco/realmfile</value>
+  </property>
+
+  <property>
+    <name>ssl.enabled</name>
+    <value>true</value>
+  </property>
+
+  <property>
+    <name>dashboard.https.enabled</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>dashboard.ssl.key</name>
+    <value>tmp/server.key</value>
+  </property>
+  <property>
+    <name>dashboard.ssl.cert</name>
+    <value>tmp/server.crt</value>
+  </property>
+  <property>
+    <name>dashboard.ssl.bind.port</name>
+    <value>10443</value>
+  </property>
+
+
+  <property>
+    <name>security.auth.server.ssl.enabled</name>
+    <value>true</value>
+  </property>
+
+
+  <property>
+    <name>router.ssl.enabled</name>
+    <value>true</value>
+  </property>
 </configuration>
