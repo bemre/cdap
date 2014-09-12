@@ -127,7 +127,7 @@
   </property>
   <property>
     <name>security.authentication.basic.realmfile</name>
-    <value>/Users/alvin/Work/workspace/caskco/realmfile</value>
+    <value>tmp/realmfile</value>
   </property>
 
   <property>
