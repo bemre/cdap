@@ -151,14 +151,14 @@
     <name>dashboard.ssl.bind.port</name>
     <value>10443</value>
   </property>
-
-
+  <property>
+    <name>router.ssl.bind.port</name>
+    <value>9443</value>
+  </property>
   <property>
     <name>security.auth.server.ssl.enabled</name>
     <value>true</value>
   </property>
-
-
   <property>
     <name>router.ssl.enabled</name>
     <value>true</value>
