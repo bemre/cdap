@@ -43,7 +43,7 @@
     -->
     <property>
         <name>router.bind.address</name>
-        <value>127.0.0.1</value>
+        <value>localhost</value>
         <description>Specifies the address for router server to bind to</description>
     </property>
 
@@ -127,7 +127,7 @@
   </property>
   <property>
     <name>security.authentication.basic.realmfile</name>
-    <value>tmp/realmfile</value>
+    <value>/Users/Shu/Documents/cask/cdap/tmp/realmfile</value>
   </property>
 
   <property>
@@ -141,11 +141,11 @@
   </property>
   <property>
     <name>dashboard.ssl.key</name>
-    <value>tmp/server.key</value>
+    <value>/Users/Shu/Documents/cask/cdap/tmp/server.key</value>
   </property>
   <property>
     <name>dashboard.ssl.cert</name>
-    <value>tmp/server.crt</value>
+    <value>/Users/Shu/Documents/cask/cdap/tmp/server.crt</value>
   </property>
   <property>
     <name>dashboard.ssl.bind.port</name>

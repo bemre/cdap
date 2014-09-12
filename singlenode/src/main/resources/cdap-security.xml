@@ -28,7 +28,7 @@
 
   <property>
     <name>security.auth.server.ssl.keystore.path</name>
-    <value>tmp/cert.jks</value>
+    <value>/Users/Shu/Documents/cask/cdap/tmp/cert.jks</value>
   </property>
 
   <property>
@@ -54,7 +54,7 @@
 
   <property>
     <name>router.ssl.keystore.path</name>
-    <value>tmp/cert.jks</value>
+    <value>/Users/Shu/Documents/cask/cdap/tmp/cert.jks</value>
   </property>
 
   <property>
