@@ -57,6 +57,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Random;
 import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLException;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 import javax.ws.rs.core.UriBuilder;
@@ -92,6 +93,7 @@ public class AccessTokenClient {
 
   private static final class ConfigurableOptions {
     private static final String HOST = "host";
+    private static final String PORT = "port";
     private static final String USER_NAME = "username";
     private static final String PASSWORD = "password";
     private static final String FILE = "file";
@@ -135,6 +137,7 @@ public class AccessTokenClient {
   private void buildOptions() {
     options = new Options();
     options.addOption(null, ConfigurableOptions.HOST, true, "To specify the host of gateway");
+    options.addOption(null, ConfigurableOptions.PORT, true, "To specify the port of gateway");
     options.addOption(null, ConfigurableOptions.USER_NAME, true, "To specify the user to login as");
     options.addOption(null, ConfigurableOptions.PASSWORD, true, "To specify the user password");
     options.addOption(null, ConfigurableOptions.FILE, true, "To specify the access token file");
@@ -142,6 +145,7 @@ public class AccessTokenClient {
     options.addOption(null, ConfigurableOptions.SSL, false, "To specify that SSL is enabled");
     options.addOption(null, ConfigurableOptions.DISABLE_CERT_CHECK, false,
                       "To specify whether to check for properly signed certificates");
+
   }
 
   /**
@@ -179,6 +183,14 @@ public class AccessTokenClient {
       host = commandLine.getOptionValue(ConfigurableOptions.HOST, "localhost");
     }
 
+    if (commandLine.hasOption(ConfigurableOptions.PORT)) {
+      try {
+        port = Integer.parseInt(commandLine.getOptionValue(ConfigurableOptions.PORT));
+      } catch (NumberFormatException e) {
+        usage("--port must be an integer value");
+      }
+    }
+
     if (commandLine.hasOption(ConfigurableOptions.USER_NAME)) {
       username = commandLine.getOptionValue(ConfigurableOptions.USER_NAME, System.getProperty("user.name"));
       if (username == null) {
@@ -210,13 +222,12 @@ public class AccessTokenClient {
     }
   }
 
-  private String getAuthenticationServerAddress(boolean useSsl) throws IOException {
+  private String getAuthenticationServerAddress() throws IOException {
     HttpClient client = new DefaultHttpClient();
     String baseUrl = "http";
     // ssl settings
     if (useSsl) {
       baseUrl = "https";
-      port = 9443;
       if (disableCertCheck) {
         try {
           client = getHTTPClient();
@@ -225,10 +236,23 @@ public class AccessTokenClient {
           System.exit(1);
         }
       }
-//      port = CConfiguration.create().getInt(Constants.Security.AuthenticationServer.SSL_PORT);
     }
+    System.err.println("YOYO " + String.format("%s://%s:%d", baseUrl, host, port));
     HttpGet get = new HttpGet(String.format("%s://%s:%d", baseUrl, host, port));
-    HttpResponse response = client.execute(get);
+//    HttpGet get = new HttpGet(String.format("%s://%s", baseUrl, host));
+    HttpResponse response;
+    try {
+      response = client.execute(get);
+    } catch (SSLException e) {
+      // localhost doesn't work with SSL enabled
+      if (host.equals(LOCALHOST)) {
+        get = new HttpGet(String.format("%s://%s:%d", baseUrl, LOCALHOST_NUM, port));
+        response = client.execute(get);
+      } else {
+        throw e;
+      }
+    }
+
 
     if (response.getStatusLine().getStatusCode() == 200) {
       System.out.println("Security is not enabled. No Access Token may be acquired");
@@ -249,6 +273,7 @@ public class AccessTokenClient {
   }
 
   protected DefaultHttpClient getHTTPClient() throws Exception {
+    System.err.println("GOT GETHTTPCLIENT");
     SSLContext sslContext = SSLContext.getInstance("SSL");
 
     // set up a TrustManager that trusts everything
@@ -291,7 +316,7 @@ public class AccessTokenClient {
 
     String baseUrl;
     try {
-      baseUrl = getAuthenticationServerAddress(true);
+      baseUrl = getAuthenticationServerAddress();
     } catch (IOException e) {
       System.err.println("Could not find Authentication service to connect to.");
       e.printStackTrace();
@@ -375,8 +400,9 @@ public class AccessTokenClient {
 
   public static void main(String[] args) throws Exception {
     AccessTokenClient accessTokenClient = new AccessTokenClient();
-    String[] myArgs = {"--host", "127.0.0.1", "--username", "user", "--password", "pass",
-                      "--file", "/Users/Shu/Documents/cask/cdap/tmp/gen_unused_key.txt", "--ssl", "--disable-cert-check"};
+    String[] myArgs = {"--host", "security-testing9941-1000.dev.continuuity.net", "--port", "9443",
+      "--file", "/Users/Shu/Documents/cask/ssl/tmp/gen_unused_key.txt", "--username", "shu",
+      "--password", "ShuvaCont57", "--ssl", "--disable-cert-check"};
     String value = accessTokenClient.execute(myArgs);
     if (value == null) {
       System.exit(1);
