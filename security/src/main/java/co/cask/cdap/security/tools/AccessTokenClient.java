@@ -237,9 +237,7 @@ public class AccessTokenClient {
         }
       }
     }
-    System.err.println("YOYO " + String.format("%s://%s:%d", baseUrl, host, port));
     HttpGet get = new HttpGet(String.format("%s://%s:%d", baseUrl, host, port));
-//    HttpGet get = new HttpGet(String.format("%s://%s", baseUrl, host));
     HttpResponse response;
     try {
       response = client.execute(get);
@@ -273,7 +271,6 @@ public class AccessTokenClient {
   }
 
   protected DefaultHttpClient getHTTPClient() throws Exception {
-    System.err.println("GOT GETHTTPCLIENT");
     SSLContext sslContext = SSLContext.getInstance("SSL");
 
     // set up a TrustManager that trusts everything
@@ -400,10 +397,7 @@ public class AccessTokenClient {
 
   public static void main(String[] args) throws Exception {
     AccessTokenClient accessTokenClient = new AccessTokenClient();
-    String[] myArgs = {"--host", "security-testing9941-1000.dev.continuuity.net", "--port", "9443",
-      "--file", "/Users/Shu/Documents/cask/ssl/tmp/gen_unused_key.txt", "--username", "shu",
-      "--password", "ShuvaCont57", "--ssl", "--disable-cert-check"};
-    String value = accessTokenClient.execute(myArgs);
+    String value = accessTokenClient.execute(args);
     if (value == null) {
       System.exit(1);
     }
