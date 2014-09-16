@@ -26,6 +26,7 @@ import jline.console.ConsoleReader;
 
 import java.io.IOException;
 import java.io.PrintStream;
+import java.net.URI;
 import java.util.Properties;
 import javax.inject.Inject;
 
@@ -47,17 +48,14 @@ public class ConnectCommand extends AbstractCommand {
   public void process(String[] args, PrintStream output) throws Exception {
     super.process(args, output);
 
-    String hostname = args[0];
+    URI uri = URI.create(args[0]);
+    String hostname = uri.getHost();
+    int port = uri.getPort();
+    boolean ssl = "https".equals(uri.getScheme());
 
-    int port;
-    boolean ssl = SocketUtil.isAvailable(hostname, cliConfig.getSslPort());
-    if (ssl) {
-      port = cliConfig.getSslPort();
-    } else if (SocketUtil.isAvailable(hostname, cliConfig.getPort())) {
-      port = cliConfig.getPort();
-    } else {
-      throw new IOException(String.format("Host %s on port %d and %d could not be reached", hostname,
-                                          cliConfig.getPort(), cliConfig.getSslPort()));
+    if (SocketUtil.isAvailable(hostname, uri.getPort())) {
+      // TODO: doesn't work with SSL
+//      throw new IOException(String.format("Host %s on port %d could not be reached", hostname, uri.getPort()));
     }
 
     AuthenticationClient authenticationClient = new BasicAuthenticationClient();
@@ -75,7 +73,7 @@ public class ConnectCommand extends AbstractCommand {
       cliConfig.getClientConfig().setAuthenticationClient(authenticationClient);
     }
 
-    cliConfig.setConnection(hostname, port, ssl);
+    cliConfig.setDestination(uri);
     output.printf("Successfully connected CDAP host at %s:%d\n", hostname, port);
   }
 }

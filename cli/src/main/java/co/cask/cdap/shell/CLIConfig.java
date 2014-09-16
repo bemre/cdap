@@ -29,7 +29,7 @@ import com.google.common.io.InputSupplier;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URISyntaxException;
+import java.net.URI;
 import java.util.List;
 
 /**
@@ -38,13 +38,12 @@ import java.util.List;
 public class CLIConfig {
 
   private static final int DEFAULT_PORT = 10000;
-  private static final int DEFAULT_SSL_PORT = 443;
   private static final boolean DEFAULT_SSL = false;
 
   private final ClientConfig clientConfig;
   private final String version;
   private String hostname;
-  private List<HostnameChangeListener> hostnameChangeListeners;
+  private List<DestinationChangeListener> destinationChangeListeners;
   private int port;
   private int sslPort;
 
@@ -54,12 +53,11 @@ public class CLIConfig {
   public CLIConfig(String hostname) {
     this.hostname = Objects.firstNonNull(hostname, "localhost");
     this.port = DEFAULT_PORT;
-    this.sslPort = DEFAULT_SSL_PORT;
     AuthenticationClient authenticationClient = new BasicAuthenticationClient();
     authenticationClient.setConnectionInfo(hostname, port, DEFAULT_SSL);
     this.clientConfig = new ClientConfig(hostname, port, authenticationClient);
     this.version = tryGetVersion();
-    this.hostnameChangeListeners = Lists.newArrayList();
+    this.destinationChangeListeners = Lists.newArrayList();
   }
 
   private static String tryGetVersion() {
@@ -96,27 +94,24 @@ public class CLIConfig {
     return version;
   }
 
-  public void setConnection(String hostname, int port, boolean ssl) throws URISyntaxException {
-    this.hostname = hostname;
-    if (ssl) {
-      this.sslPort = port;
-    } else {
-      this.port = port;
-    }
+  public void setDestination(URI uri) {
+    boolean ssl = "https".equals(uri.getScheme());
+    this.hostname = uri.getHost();
+    this.port = uri.getPort();
     this.clientConfig.setHostnameAndPort(hostname, port, ssl);
-    for (HostnameChangeListener listener : hostnameChangeListeners) {
-      listener.onHostnameChanged(hostname);
+    for (DestinationChangeListener listener : destinationChangeListeners) {
+      listener.onDestinationChanged(hostname, port, ssl);
     }
   }
 
-  public void addHostnameChangeListener(HostnameChangeListener listener) {
-    this.hostnameChangeListeners.add(listener);
+  public void addHostnameChangeListener(DestinationChangeListener listener) {
+    this.destinationChangeListeners.add(listener);
   }
 
   /**
    * Listener for hostname changes.
    */
-  public interface HostnameChangeListener {
-    void onHostnameChanged(String newHostname);
+  public interface DestinationChangeListener {
+    void onDestinationChanged(String newHostname, int newPort, boolean newSSLEnabled);
   }
 }

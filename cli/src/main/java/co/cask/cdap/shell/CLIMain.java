@@ -63,10 +63,11 @@ public class CLIMain {
   public CLIMain(final CLIConfig cliConfig) throws URISyntaxException, IOException {
     this.reader = new ConsoleReader();
     this.cliConfig = cliConfig;
-    this.cliConfig.addHostnameChangeListener(new CLIConfig.HostnameChangeListener() {
+    this.cliConfig.addHostnameChangeListener(new CLIConfig.DestinationChangeListener() {
       @Override
-      public void onHostnameChanged(String newHostname) {
-        reader.setPrompt("cdap (" + cliConfig.getHost() + ":" + cliConfig.getClientConfig().getPort() + ")> ");
+      public void onDestinationChanged(String newHostname, int newPort, boolean newSSLEnabled) {
+        reader.setPrompt("cdap (" + (newSSLEnabled ? "https" : "http")
+                           + cliConfig.getHost() + ":" + cliConfig.getClientConfig().getPort() + ")> ");
       }
     });
     this.helpCommand = new HelpCommand(new Supplier<CommandSet>() {
@@ -114,7 +115,7 @@ public class CLIMain {
    * @throws Exception
    */
   public void startShellMode(PrintStream output) throws Exception {
-    this.reader.setPrompt("cdap (" + cliConfig.getHost() + ":" + cliConfig.getClientConfig().getPort() + ")> ");
+    this.reader.setPrompt("cdap (http://" + cliConfig.getHost() + ":" + cliConfig.getClientConfig().getPort() + ")> ");
     this.reader.setHandleUserInterrupt(true);
 
     for (Completer completer : commands.getCompleters(null)) {
@@ -144,6 +145,7 @@ public class CLIMain {
           output.println("Invalid command: " + command + " (enter 'help' to list all available commands)");
         } catch (Exception e) {
           output.println("Error: " + e.getMessage());
+          e.printStackTrace();
         }
         output.println();
       }
