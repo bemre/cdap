@@ -740,7 +740,7 @@ Non-Interactive Mode
 To run the CLI in non-interactive mode, run the ``cdap-cli`` executable, passing the command you want executed
 as the argument. For example, to list all applications currently deployed to CDAP, execute::
 
-  cdap list apps
+  cdap-cli.sh list apps
 
 Available Commands
 ------------------
