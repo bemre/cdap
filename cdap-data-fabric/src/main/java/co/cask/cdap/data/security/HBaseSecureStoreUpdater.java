@@ -26,6 +26,8 @@ import org.apache.twill.api.SecureStoreUpdater;
 import org.apache.twill.filesystem.LocationFactory;
 import org.apache.twill.internal.yarn.YarnUtils;
 import org.apache.twill.yarn.YarnSecureStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
@@ -34,6 +36,8 @@ import java.util.concurrent.TimeUnit;
  * A {@link SecureStoreUpdater} that provides update to HBase secure token.
  */
 public final class HBaseSecureStoreUpdater implements SecureStoreUpdater {
+
+  private static final Logger LOG = LoggerFactory.getLogger(HBaseSecureStoreUpdater.class);
 
   private final Configuration hConf;
   private final LocationFactory locationFactory;
@@ -51,6 +55,7 @@ public final class HBaseSecureStoreUpdater implements SecureStoreUpdater {
     try {
       HBaseTokenUtils.obtainToken(hConf, credentials);
       YarnUtils.addDelegationTokens(hConf, locationFactory, credentials);
+      LOG.info("!!! Refreshed HBase credentials");
     } catch (IOException ioe) {
       throw Throwables.propagate(ioe);
     }
@@ -67,6 +72,7 @@ public final class HBaseSecureStoreUpdater implements SecureStoreUpdater {
 
   @Override
   public SecureStore update(String application, RunId runId) {
+    LOG.info("!!! Got secure store update call");
     long now = System.currentTimeMillis();
     if (now >= nextUpdateTime) {
       nextUpdateTime = now + getUpdateInterval();

@@ -350,8 +350,9 @@ public class MasterServiceMain extends DaemonMain {
 
   private void scheduleSecureStoreUpdate(TwillRunner twillRunner) {
     if (User.isHBaseSecurityEnabled(hConf)) {
-      twillRunner.scheduleSecureStoreUpdate(secureStoreUpdater, 30000L, secureStoreUpdater.getUpdateInterval(),
-                                            TimeUnit.MILLISECONDS);
+      LOG.info("!!! Scheduling secure store update");
+      twillRunner.scheduleSecureStoreUpdate(secureStoreUpdater, 15, 30,
+                                            TimeUnit.SECONDS);
     }
   }
 
